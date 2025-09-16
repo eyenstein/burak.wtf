@@ -1,5 +1,7 @@
-<!doctype html>
-<html lang="en">
+cd ~/Desktop/burak.wtf/apps/t0kenumbers/wasm-src
+tee play.html > /dev/null <<'HTML'
+<!DOCTYPE html>
+<html>
 <head>
   <meta charset="utf-8" />
   <title>t0kenplay</title>
@@ -11,18 +13,16 @@
 </head>
 <body>
   <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
-
   <script>
-    // Emscripten runtime bu Module objesini kullanacak
     var Module = {
-      canvas: (function(){ return document.getElementById('canvas'); })(),
-      setStatus: function(){},   // status bar’ı kapat
-      print: function(){},       // output textarea yok
+      canvas: document.getElementById('canvas'),
+      setStatus: function(){},
+      print: function(){},
       monitorRunDependencies: function(){},
     };
-    // İstersen WebGL context-loss uyarısını da kaldır:
     Module.canvas.addEventListener('webglcontextlost', function(e){ e.preventDefault(); }, false);
   </script>
   <script src="tokenplay.js"></script>
 </body>
 </html>
+HTML
