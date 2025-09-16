@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>burak.wtf — ring breathe</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <canvas id="stage" class="stage"></canvas>
+
+  <div id="panel" class="bottom">
+    <div class="sections">
+      <details id="shapeSec" open>
+        <summary>Shape <span class="caret">▶</span></summary>
+        <div class="content grid3">
+          <div class="label">gain high</div>
+          <input id="ghi" type="range" min="0" max="240" step="0.1" value="7.7">
+          <div id="ghiVal" class="val">7.7</div>
+
+          <div class="label">gain low</div>
+          <input id="glo" type="range" min="0" max="100" step="0.1" value="0.3">
+          <div id="gloVal" class="val">0.3</div>
+
+          <div class="label">moons (0–7)</div>
+          <input id="moonCount" type="range" min="0" max="7" step="1" value="3">
+          <div id="moonCountVal" class="val">3</div>
+
+          <div class="label">min radius (% exhale)</div>
+          <input id="sizeMin" type="range" min="2" max="90" step="1" value="12">
+          <div id="sizeMinVal" class="val">12%</div>
+
+          <div class="label">max radius (% inhale)</div>
+          <input id="sizeMax" type="range" min="5" max="95" step="1" value="66">
+          <div id="sizeMaxVal" class="val">66%</div>
+
+          <div class="label">base shift (±%)</div>
+          <input id="sizeBase" type="range" min="-40" max="40" step="1" value="0">
+          <div id="sizeBaseVal" class="val">0%</div>
+        </div>
+      </details>
+
+      <details id="breatheSec" open>
+        <summary>Breathe <span class="caret">▶</span></summary>
+        <div class="content grid3">
+          <div class="label">inhale (s)</div>
+          <input id="tin" type="range" min="0.1" max="120" step="0.1" value="3">
+          <div id="tinVal" class="val">3.0</div>
+
+          <div class="label">hold in (s)</div>
+          <input id="thold" type="range" min="0" max="60" step="0.1" value="2">
+          <div id="tholdVal" class="val">2.0</div>
+
+          <div class="label">exhale (s)</div>
+          <input id="tout" type="range" min="0.1" max="120" step="0.1" value="7">
+          <div id="toutVal" class="val">7.0</div>
+
+          <div class="label">hold out (s)</div>
+          <input id="bhold" type="range" min="0" max="60" step="0.1" value="1.5">
+          <div id="bholdVal" class="val">1.5</div>
+
+          <div class="row">
+            <label><input id="holdInChk" type="checkbox" checked> Hold In aktif</label>
+            <label><input id="holdOutChk" type="checkbox" checked> Hold Out aktif</label>
+          </div>
+
+          <div class="row">
+            <label style="display:flex;align-items:center;gap:8px;">
+              <input id="rationalChk" type="checkbox"> rational breathing
+            </label>
+            <div id="ratInfo"></div>
+          </div>
+
+          <div class="label">units (0–57)</div>
+          <input id="rationalUnits" type="range" min="0" max="57" step="1" value="1" disabled>
+          <div id="rationalVal" class="val">1</div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <!-- Three.js CDN -->
+  <script type="module">
+    import * as THREE from "https://unpkg.com/three@0.160.0/build/three.module.js";
+    window.THREE = THREE;
+  </script>
+
+  <!-- App -->
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

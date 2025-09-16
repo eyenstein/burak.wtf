@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<title>burak.wtf — hollow ring + rational holds + moons + press-to-boost + size-cap</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin:0; padding:0; height:100%; background:#000; }
+  body { display:flex; align-items:center; justify-content:center; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:#fff; user-select:none; }
+  canvas.stage { position:fixed; inset:0; touch-action:none; }
+
+  .bottom {
+    position: fixed; left:0; right:0; bottom:0;
+    background: rgba(0,0,0,.55);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid rgba(255,255,255,.15);
+    padding: 8px 10px;
+    display: grid; gap: 8px; z-index: 2;
+  }
+  .sections { display:grid; grid-template-columns: repeat(2, minmax(280px,1fr)); gap:8px; }
+  @media (max-width: 820px){ .sections { grid-template-columns: 1fr; } }
+  details { border:1px solid rgba(255,255,255,.15); border-radius:10px; overflow:clip; background:rgba(255,255,255,.04); }
+  summary { list-style:none; cursor:pointer; padding:8px 10px; font-size:12px; letter-spacing:.02em; display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,.05); }
+  summary::-webkit-details-marker{ display:none; }
+  .caret{ opacity:.7; transition: transform .2s ease; } details[open] .caret{ transform: rotate(90deg); }
+  .content { padding:8px 10px; }
+  .grid3 { display:grid; gap:10px 12px; grid-template-columns:auto 1fr auto; align-items:center; }
+  .label { opacity:.85; white-space:nowrap; font-size:12px; }
+  input[type="range"] { width:100%; touch-action: pan-y; }
+  .val { font-variant-numeric: tabular-nums; opacity:.85; font-size:12px; }
+  .row { grid-column:1/-1; display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-size:12px; opacity:.9; }
+</style>
+</head>
+<body>
+<canvas id="c" class="stage"></canvas>
+
+<div id="bottom" class="bottom" role="region" aria-label="controls">
+  <div class="sections">
+    <!-- SHAPE -->
+    <details id="shapeSec">
+      <summary>Shape <span class="caret">▶</span></summary>
+      <div class="content grid3">
+        <div class="label">base radius</div>
+        <input id="radius" type="range" min="0.20" max="0.80" step="0.005" value="0.42">
+        <div id="radiusVal" class="val">0.42</div>
+
+        <div class="label">opacity</div>
+        <input id="opacity" type="range" min="0.00" max="1.00" step="0.01" value="1.00">
+        <div id="opacityVal" class="val">1.00</div>
+
+        <div class="label">gain high</div>
+        <input id="ghi"  type="range" min="0.00" max="24" step="0.01" value="7.77">
+        <div id="ghiVal" class="val">7.77</div>
+
+        <div class="label">gain low</div>
+        <input id="glo"  type="range" min="0.00" max="10" step="0.01" value="0.33">
+        <div id="gloVal" class="val">0.33</div>
+
+        <div class="label">moons (0–7)</div>
+        <input id="moonCount" type="range" min="0" max="7" step="1" value="0">
+        <div id="moonCountVal" class="val">0</div>
+
+        <div class="label">breath size</div>
+        <input id="breathSize" type="range" min="0.00" max="0.60" step="0.005" value="0.18">
+        <div id="breathSizeVal" class="val">0.18</div>
+
+        <div class="label">peak size (screen %)</div>
+        <input id="peakFrac" type="range" min="0.20" max="0.66" step="0.01" value="0.66">
+        <div id="peakFracVal" class="val">0.66</div>
+      </div>
+    </details>
+
+    <!-- BREATHE -->
+    <details id="breatheSec">
+      <summary>Breathe <span class="caret">▶</span></summary>
+      <div class="content grid3">
+        <!-- LOG slider’lar: 0..1 -> 0.2s..120s -->
+        <div class="label">inhale (s)</div>
+        <input id="tin"  type="range" min="0" max="1" step="0.001" value="0.35">
+        <div id="tinVal" class="val">3.0</div>
+
+        <div class="label">hold in</div>
+        <input id="thold" type="range" min="0" max="1" step="0.001" value="0.25">
+        <div id="tholdVal" class="val">2.0</div>
+
+        <div class="label">exhale (s)</div>
+        <input id="tout" type="range" min="0" max="1" step="0.001" value="0.70">
+        <div id="toutVal" class="val">7.0</div>
+
+        <div class="label">hold out</div>
+        <input id="bhold" type="range" min="0" max="1" step="0.001" value="0.20">
+        <div id="bholdVal" class="val">1.5</div>
+
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input id="holdInChk" type="checkbox" checked /> Hold In aktif
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input id="holdOutChk" type="checkbox" checked /> Hold Out aktif
+          </label>
+        </div>
+
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input id="rationalChk" type="checkbox" />
+            rational breathing
+          </label>
+          <div id="ratInfo"></div>
+        </div>
+
+        <div class="label">units (0–57)</div>
+        <input id="rationalUnits" type="range" min="0" max="57" step="1" value="1" disabled>
+        <div id="rationalVal" class="val">1</div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000, 1);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 100);
+camera.position.set(0, 0, 3);
+
+/* ================== RING (hollow, tek renk) ================== */
+const ringGroup = new THREE.Group();
+scene.add(ringGroup);
+
+const PLANE_SIZE = 2.9;
+const planeGeo = new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE, 1, 1);
+const COLOR = '#FFD75A';
+
+const ringMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  uniforms: {
+    uTime:{value:0}, uRadius:{value:0.42}, uWidth:{value:3.2},
+    uGain:{value:1.0}, uAlpha:{value:1.0}, uColor:{value:new THREE.Color(COLOR)}
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: `
+    precision highp float; varying vec2 vUv;
+    uniform float uTime,uRadius,uWidth,uGain,uAlpha; uniform vec3 uColor;
+    void main(){
+      vec2 p = vUv - 0.5; float r = length(p) * 2.0;
+      float inner = 1.0 - smoothstep(uRadius - (1.0/uWidth), uRadius, r);
+      float outer = smoothstep(uRadius, uRadius + (0.9/uWidth), r);
+      float ring  = inner * (1.0 - outer);
+      float a = ring * uGain * uAlpha;
+      vec3  c = uColor * (0.98 + 0.02*sin(uTime*2.0));
+      gl_FragColor = vec4(c*a, a);
+      if(gl_FragColor.a < 0.001) discard;
+    }
+  `
+});
+const ringMesh = new THREE.Mesh(planeGeo, ringMat);
+ringMesh.renderOrder = 2;
+ringGroup.add(ringMesh);
+
+/* ================== MOONS (0–7; 7. yin-yang) ================== */
+const MOON_COLORS = ['#FFD75A','#FFA500','#FF3B30','#7B1E7A','#4DA3FF','#00FF7F']; // 0..5
+const yinYangFrag = `
+  precision highp float; uniform float uAlpha;
+  void main(){
+    vec2 uv = gl_PointCoord*2.0 - 1.0;
+    float r2 = dot(uv,uv); if (r2 > 1.0) discard;
+    float aEdge = smoothstep(1.0, 0.80, r2);
+    float upper = step(0.0, uv.y);
+    float base = upper; // üst beyaz, alt siyah
+    float rSmall = 0.28;
+    float topDot = 1.0 - smoothstep(rSmall*rSmall, (rSmall*rSmall)*1.2, dot(uv - vec2(0.0, 0.5), uv - vec2(0.0, 0.5)));
+    float botDot = 1.0 - smoothstep(rSmall*rSmall, (rSmall*rSmall)*1.2, dot(uv - vec2(0.0,-0.5), uv - vec2(0.0,-0.5)));
+    vec3 col = vec3(base);
+    col = mix(col, vec3(1.0), botDot);
+    col = mix(col, vec3(0.0), topDot);
+    float a = aEdge * uAlpha;
+    gl_FragColor = vec4(col * a, a);
+  }
+`;
+let moons = [];
+function createMoonMaterial(idx){
+  if (idx === 6){
+    return new THREE.ShaderMaterial({
+      transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+      uniforms:{ uGain:{value:1.0}, uAlpha:{value:1.0} },
+      vertexShader: `
+        uniform float uGain, uAlpha;
+        void main(){
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          float base = 14.0, boost = 10.0 * clamp(uGain/8.0, 0.0, 1.0);
+          float distScale = (300.0 / -gl_Position.z);
+          gl_PointSize = (base + boost) * distScale;
+        }`,
+      fragmentShader: yinYangFrag
+    });
+  }
+  const col = new THREE.Color(MOON_COLORS[idx]);
+  return new THREE.ShaderMaterial({
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    uniforms:{ uGain:{value:1.0}, uAlpha:{value:1.0}, uColor:{value:col} },
+    vertexShader: `
+      uniform float uGain, uAlpha;
+      void main(){
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        float base = 12.0, boost = 8.0 * clamp(uGain/8.0, 0.0, 1.0);
+        float distScale = (300.0 / -gl_Position.z);
+        gl_PointSize = (base + boost) * distScale;
+      }`,
+    fragmentShader: `
+      precision highp float; uniform vec3 uColor; uniform float uAlpha;
+      void main(){
+        vec2 uv = gl_PointCoord*2.0 - 1.0;
+        float r2 = dot(uv,uv); if (r2 > 1.0) discard;
+        float a = exp(-r2*4.5) * uAlpha;
+        gl_FragColor = vec4(uColor * a, a);
+      }`
+  });
+}
+function rebuildMoons(n, radius, alpha){
+  moons.forEach(m=>{ ringGroup.remove(m.mesh); m.mesh.geometry.dispose(); m.mesh.material.dispose(); });
+  moons = [];
+  for(let i=0;i<n;i++){
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
+    const mat = createMoonMaterial(i===6?6:i);
+    const mesh = new THREE.Points(geo, mat);
+    mesh.renderOrder = 3;
+
+    const seed = Math.random()*1000;
+    const baseR = radius * (1.35 + 0.35*Math.random()); // HALKANIN DIŞI
+    const baseW = 0.40 + Math.random()*0.60;            // rad/sn
+    const phase= Math.random()*Math.PI*2;
+
+    const tiltAmp = 0.55; // ~31°
+    const tiltSpeedX = 0.05 + Math.random()*0.07;
+    const tiltSpeedY = 0.05 + Math.random()*0.07;
+
+    moons.push({ mesh, seed, baseR, baseW, phase, tiltAmp, tiltSpeedX, tiltSpeedY });
+    ringGroup.add(mesh);
+    if (mesh.material.uniforms.uAlpha) mesh.material.uniforms.uAlpha.value = alpha;
+  }
+}
+
+/* ================== İnteraksiyon — inertial trackball + press-to-boost ================== */
+let yaw = 0, pitch = 0, yawVel = 0, pitchVel = 0, distance = 3;
+let isDown=false, lastX=0, lastY=0, lastMoveT=performance.now();
+const DRIVE=14.0, FRICTION=0.95, MAX_V=14.0;
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+function pointerXY(e){ if('clientX'in e) return [e.clientX,e.clientY]; if('touches'in e&&e.touches.length) return [e.touches[0].clientX,e.touches[0].clientY]; return [0,0]; }
+
+canvas.addEventListener('pointerdown',(e)=>{
+  isDown=true; canvas.setPointerCapture(e.pointerId);
+  [lastX,lastY]=pointerXY(e); lastMoveT=performance.now();
+  boostStart(performance.now());
+});
+canvas.addEventListener('pointermove',(e)=>{
+  if(!isDown) return;
+  const [x,y]=pointerXY(e); const now=performance.now();
+  let dt=(now-lastMoveT)/1000; if(dt<=0) dt=1/120;
+  const dx=(x-lastX)/innerWidth, dy=(y-lastY)/innerHeight;
+  lastX=x; lastY=y; lastMoveT=now;
+  const k=Math.PI;
+  const tYaw=clamp((-dx*k)/dt,-MAX_V,MAX_V);
+  const tPit=clamp((-dy*k*0.7)/dt,-MAX_V,MAX_V);
+  const a=1.0-Math.exp(-DRIVE*dt);
+  yawVel+=(tYaw-yawVel)*a; pitchVel+=(tPit-pitchVel)*a;
+});
+canvas.addEventListener('pointerup',(e)=>{ isDown=false; canvas.releasePointerCapture(e.pointerId); boostEnd(performance.now()); });
+
+addEventListener('wheel',(e)=>{ distance+=Math.sign(e.deltaY)*0.15; distance=clamp(distance,1.4,6.0); },{passive:true});
+let pinchStart=0;
+canvas.addEventListener('touchstart',(e)=>{ 
+  if(e.touches.length===2){ const dx=e.touches[0].clientX-e.touches[1].clientX; const dy=e.touches[0].clientY-e.touches[1].clientY; pinchStart=Math.hypot(dx,dy);}
+},{passive:true});
+canvas.addEventListener('touchmove',(e)=>{ 
+  if(e.touches.length===2){ const dx=e.touches[0].clientX-e.touches[1].clientX; const dy=e.touches[0].clientY-e.touches[1].clientY; const d=Math.hypot(dx,dy); const s=(pinchStart>0)?(pinchStart/d):1.0; distance=clamp(distance*s,1.4,6.0); pinchStart=d; }
+},{passive:true});
+
+/* ================== Kontroller ================== */
+const radiusEl = document.getElementById('radius');
+const opacityEl= document.getElementById('opacity');
+const ghiEl    = document.getElementById('ghi');
+const gloEl    = document.getElementById('glo');
+const moonCountEl = document.getElementById('moonCount');
+const breathSizeEl= document.getElementById('breathSize');
+const peakFracEl  = document.getElementById('peakFrac');
+
+const radiusVal = document.getElementById('radiusVal');
+const opacityVal= document.getElementById('opacityVal');
+const ghiVal    = document.getElementById('ghiVal');
+const gloVal    = document.getElementById('gloVal');
+const moonCountVal = document.getElementById('moonCountVal');
+const breathSizeVal= document.getElementById('breathSizeVal');
+const peakFracVal  = document.getElementById('peakFracVal');
+
+const tinEl   = document.getElementById('tin');   // 0..1 (log)
+const tholdEl = document.getElementById('thold'); // 0..1 (log)
+const toutEl  = document.getElementById('tout');  // 0..1 (log)
+const bholdEl = document.getElementById('bhold'); // 0..1 (log)
+const holdInChk  = document.getElementById('holdInChk');
+const holdOutChk = document.getElementById('holdOutChk');
+
+const tinVal   = document.getElementById('tinVal');
+const tholdVal = document.getElementById('tholdVal');
+const toutVal  = document.getElementById('toutVal');
+const bholdVal = document.getElementById('bholdVal'); // FIXED typo
+
+const rationalChk   = document.getElementById('rationalChk');
+const rationalUnits = document.getElementById('rationalUnits');
+const rationalVal   = document.getElementById('rationalVal');
+const ratInfo       = document.getElementById('ratInfo');
+
+/* LOG haritalama: slider t∈[0,1] → secs∈[0.2,120] */
+const S_MIN=0.2, S_MAX=120;
+const logMap = (t)=> Math.exp( Math.log(S_MIN)*(1-t) + Math.log(S_MAX)*t );
+
+function updUI(){
+  radiusVal.textContent = (+radiusEl.value).toFixed(2);
+  opacityVal.textContent= (+opacityEl.value).toFixed(2);
+  ghiVal.textContent    = (+ghiEl.value).toFixed(2);
+  gloVal.textContent    = (+gloEl.value).toFixed(2);
+  moonCountVal.textContent = moonCountEl.value;
+  breathSizeVal.textContent = (+breathSizeEl.value).toFixed(3);
+  peakFracVal.textContent   = (+peakFracEl.value).toFixed(2);
+
+  const inh=logMap(+tinEl.value), th=holdInChk.checked?logMap(+tholdEl.value):0, exh=logMap(+toutEl.value), bh=holdOutChk.checked?logMap(+bholdEl.value):0;
+  tinVal.textContent   = inh.toFixed(inh<10?2:1);
+  tholdVal.textContent = th.toFixed(th<10?2:1);
+  toutVal.textContent  = exh.toFixed(exh<10?2:1);
+  bholdVal.textContent = bh.toFixed(bh<10?2:1);
+}
+
+radiusEl.addEventListener('input', ()=>{
+  const r = parseFloat(radiusEl.value);
+  ringMat.uniforms.uRadius.value = r;
+  moons.forEach(m=> m.baseR = r * (1.35 + 0.35*Math.random()));
+  updUI();
+});
+opacityEl.addEventListener('input', ()=>{
+  const a = parseFloat(opacityEl.value);
+  ringMat.uniforms.uAlpha.value = a;
+  moons.forEach(m=> m.mesh.material.uniforms.uAlpha && (m.mesh.material.uniforms.uAlpha.value = a));
+  updUI();
+});
+[ghiEl,gloEl,breathSizeEl,peakFracEl].forEach(el=> el.addEventListener('input', updUI));
+moonCountEl.addEventListener('change', ()=>{
+  rebuildMoons(parseInt(moonCountEl.value,10), parseFloat(radiusEl.value), parseFloat(opacityEl.value));
+  updUI();
+});
+[tinEl, tholdEl, toutEl, bholdEl, holdInChk, holdOutChk].forEach(el=> el.addEventListener('input', updUI));
+
+rationalChk.addEventListener('change', ()=>{
+  const on = rationalChk.checked;
+  rationalUnits.disabled = !on;
+  [tinEl, tholdEl, toutEl, bholdEl, holdInChk, holdOutChk].forEach(el=> el.disabled = on);
+  updateRatInfo();
+});
+rationalUnits.addEventListener('input', ()=>{ rationalVal.textContent=rationalUnits.value; updateRatInfo(); });
+
+function fmtSecs(x){ if(x>3600)return (x/3600).toFixed(1)+'h'; if(x>600)return (x/60).toFixed(1)+'m'; return x.toFixed(x<10?2:1)+'s'; }
+function fibPair(n){ if(n<=0)return [0n,0n]; let a=0n,b=1n; for(let i=1;i<=n;i++){const t=a+b; a=b; b=t;} return [a,b]; }
+function bigToNum(bi){ const MAX=1e12; const n=Number(bi); return !Number.isFinite(n)?MAX:Math.min(n,MAX); }
+
+/* RATIONAL: inhale=F_n, exhale=F_{n+1}; topHold=F_{n-1}, bottomHold=F_n (N=1 özel: hepsi 1) */
+function updateRatInfo(){
+  const n=parseInt(rationalUnits.value,10);
+  if(!rationalChk.checked){ ratInfo.textContent=''; return; }
+  if(n===0){ ratInfo.textContent='breathless (sabit)'; return; }
+  const [Fi,Fj]=fibPair(Math.max(1,n)); // Fi=F_n, Fj=F_{n+1}
+  const Fnm1 = (n<=1)?1:bigToNum(fibPair(n-1)[0]);
+  const inh = (n===1)?1:bigToNum(Fi);
+  const exh = (n===1)?1:bigToNum(Fj);
+  const th  = (n===1)?1:Fnm1;       // top hold = F_{n-1}
+  const bh  = (n===1)?1:bigToNum(Fi); // bottom hold = F_n
+  ratInfo.textContent = `N=${n} → inhale=${fmtSecs(inh)} • topHold=${fmtSecs(th)} • exhale=${fmtSecs(exh)} • bottomHold=${fmtSecs(bh)}`;
+  rationalVal.textContent = n;
+}
+
+/* ================== NEFES MOTORU (inhale → topHold → exhale → bottomHold) ================== */
+function breathGain(t, tin, thold, tout, bhold, lo, hi){
+  tin=Math.max(0.0,tin); thold=Math.max(0.0,thold); tout=Math.max(0.0,tout); bhold=Math.max(0.0,bhold);
+  const T = tin + thold + tout + bhold;
+  if (T < 1e-6) return (lo+hi)*0.5;
+  const ph = t % T;
+  if (ph < tin){ const u=ph/tin; return lo + (hi-lo)*u; }
+  if (ph < tin + thold){ return hi; }
+  if (ph < tin + thold + tout){ const u=(ph - (tin+thold)) / tout; return hi + (lo - hi)*u; }
+  return lo;
+}
+
+/* ================== PRESS-TO-BOOST ================== */
+let boost = {
+  active:false, t0:0, pressDur:0, // ms
+  up:false, t1:0, releaseDur:0,
+  radiusBase:0.42, radiusDelta:0.00,
+  radiusMaxAbs:0.95, // absolute safety cap in shader-units
+  gainBaseMul:1.0, gainBoostMul:10.0 // ilave çarpan (hi/lo üzerine)
+};
+function boostStart(nowMS){
+  boost.active = true; boost.up = false;
+  boost.t0 = nowMS; boost.pressDur = 0;
+  boost.radiusBase = parseFloat(radiusEl.value);
+}
+function boostEnd(nowMS){
+  boost.active = false; boost.up = true;
+  boost.t1 = nowMS;
+  boost.releaseDur = Math.max(200, boost.pressDur);
+}
+function easeLog01(ms){
+  const s = ms/1000;
+  const Lmin=1, Lmax=13;
+  const x = Math.min(Math.max(s, Lmin), Lmax);
+  const u = (Math.log(x) - Math.log(Lmin)) / (Math.log(Lmax) - Math.log(Lmin));
+  return Math.pow(u, 0.85);
+}
+
+/* ===== Size cap helpers: cap peak diameter to a fraction of screen ===== */
+function worldViewSpans(){
+  const h = 2 * distance * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
+  const w = h * camera.aspect;
+  return {w, h, min: Math.min(w,h)};
+}
+function outerDiameterFromURadius(uRad){
+  const edge = 0.9 / ringMat.uniforms.uWidth.value;
+  return (uRad + edge) * PLANE_SIZE;
+}
+function uRadiusCapFromScreenFrac(frac){
+  const targetWorldDia = frac * worldViewSpans().min;
+  const edge = 0.9 / ringMat.uniforms.uWidth.value;
+  return Math.max(0.02, (targetWorldDia / PLANE_SIZE) - edge);
+}
+
+/* ================== ANIMATE ================== */
+const clock = new THREE.Clock();
+function tick(){
+  const t  = clock.getElapsedTime();
+  const dt = clock.getDelta();
+
+  // Atalet
+  const decay=Math.exp(-0.95*dt);
+  yawVel*=decay; pitchVel*=decay;
+  yaw += yawVel*dt; pitch += pitchVel*dt;
+  pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+
+  ringGroup.rotation.set(pitch, yaw, 0);
+  camera.position.set(0, 0, distance);
+  camera.lookAt(0, 0, 0);
+
+  // Süreler: manual LOG veya rational override
+  let tinSec   = logMap(+tinEl.value);
+  let tholdSec = holdInChk.checked ? logMap(+tholdEl.value) : 0;
+  let toutSec  = logMap(+toutEl.value);
+  let bholdSec = holdOutChk.checked ? logMap(+bholdEl.value) : 0;
+
+  if (rationalChk.checked){
+    const n = parseInt(rationalUnits.value,10);
+    if (n===0){ tinSec=tholdSec=toutSec=bholdSec=0; }
+    else {
+      const [Fi,Fj]=fibPair(Math.max(1,n)); // F_n, F_{n+1}
+      const Fnm1 = (n<=1)?1:bigToNum(fibPair(n-1)[0]);
+      tinSec   = (n===1)?1:bigToNum(Fi);
+      toutSec  = (n===1)?1:bigToNum(Fj);
+      tholdSec = (n===1)?1:Fnm1;             // top hold = F_{n-1}
+      bholdSec = (n===1)?1:bigToNum(Fi);     // bottom hold = F_n
+    }
+  }
+
+  const lo=parseFloat(gloEl.value), hi=parseFloat(ghiEl.value);
+  let gBreath = breathGain(t, tinSec, tholdSec, toutSec, bholdSec, lo, hi);
+
+  // Breath-normalize 0..1 for size drive
+  const denom = Math.max(1e-6, (hi - lo));
+  const breathU = THREE.MathUtils.clamp((gBreath - lo) / denom, 0, 1);
+
+  // Desired uRadius from breath
+  const baseR = parseFloat(radiusEl.value);
+  const extra = parseFloat(breathSizeEl.value) * breathU;
+  let uRadiusTarget = baseR + extra;
+
+  // Apply press-to-boost additively (also clamped)
+  const now = performance.now();
+  if (boost.active){
+    boost.pressDur = now - boost.t0;
+    const u = easeLog01(boost.pressDur);    // 0..1
+    const add = 0.30 * u;                   // up to +0.30 uRadius from boost
+    uRadiusTarget += add;
+    const gMul = 1.0 + (boost.gainBoostMul - 1.0) * u;
+    gBreath *= gMul;
+  } else if (boost.up){
+    const elapsed = now - boost.t1;
+    const u = 1.0 - easeLog01(Math.min(elapsed, boost.releaseDur)); // 1→0
+    const add = 0.30 * u;
+    uRadiusTarget += add;
+    const gMul = 1.0 + (boost.gainBoostMul - 1.0) * u;
+    gBreath *= gMul;
+    if (elapsed >= boost.releaseDur){ boost.up = false; }
+  }
+
+  // Enforce cap based on screen fraction (dynamic with zoom/FOV)
+  const frac = parseFloat(peakFracEl.value);
+  const uCap = Math.min(uRadiusCapFromScreenFrac(frac), boost.radiusMaxAbs);
+  uRadiusTarget = Math.min(uRadiusTarget, uCap);
+
+  // Smooth radius
+  ringMat.uniforms.uRadius.value += (uRadiusTarget - ringMat.uniforms.uRadius.value) * (1.0 - Math.exp(-6*dt));
+
+  // Update visuals
+  ringMat.uniforms.uGain.value = gBreath;
+  ringMat.uniforms.uTime.value = t;
+
+  // Moons: düz dairesel hareket + yavaş precession
+  moons.forEach((m,i)=>{
+    const pos = m.mesh.geometry.attributes.position.array;
+    const speedScale = 0.8 + Math.min(Math.log(1.0+gBreath), 2.0);
+    const th = m.phase + t * m.baseW * speedScale;
+
+    const tx = Math.sin(t*m.tiltSpeedX + m.seed) * m.tiltAmp;
+    const ty = Math.sin(t*m.tiltSpeedY + m.seed*1.37) * m.tiltAmp;
+
+    let x = Math.cos(th) * m.baseR * 1.18;
+    let y = Math.sin(th) * m.baseR * 1.18;
+    let z = 0.0;
+
+    const x1 =  x*Math.cos(ty) + z*Math.sin(ty);
+    const z1 = -x*Math.sin(ty) + z*Math.cos(ty);
+    const y2 =  y*Math.cos(tx) - z1*Math.sin(tx);
+    const z2 =  y*Math.sin(tx) + z1*Math.cos(tx);
+
+    pos[0] = x1; pos[1] = y2; pos[2] = z2 * 0.22;
+    m.mesh.geometry.attributes.position.needsUpdate = true;
+
+    if (m.mesh.material.uniforms.uGain)  m.mesh.material.uniforms.uGain.value  = gBreath;
+    if (m.mesh.material.uniforms.uAlpha) m.mesh.material.uniforms.uAlpha.value = parseFloat(opacityEl.value);
+  });
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+/* Resize */
+addEventListener('resize', ()=>{ 
+  renderer.setSize(innerWidth, innerHeight); 
+  camera.aspect=innerWidth/innerHeight; 
+  camera.updateProjectionMatrix(); 
+});
+
+/* Başlangıç: başlıklar kapalı ve UI yazıları */
+document.getElementById('shapeSec').open=false;
+document.getElementById('breatheSec').open=false;
+(function initUI(){
+  const r = parseFloat(radiusEl.value);
+  ringMat.uniforms.uRadius.value = r;
+  ringMat.uniforms.uAlpha.value  = parseFloat(opacityEl.value);
+  rebuildMoons(parseInt(moonCountEl.value,10), r, parseFloat(opacityEl.value));
+  updUI();
+})();
+</script>
+</body>
+</html>

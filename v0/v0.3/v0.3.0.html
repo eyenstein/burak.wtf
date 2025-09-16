@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>burak.wtf — light ring</title>
+<meta name="viewport"
+  content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style>
+  html, body { margin:0; padding:0; height:100%; background:#fff; }
+  body {
+    display:flex; align-items:center; justify-content:center;
+    font-family: Helvetica, Arial, sans-serif;
+    min-height: -webkit-fill-available;
+    background:#fff;
+  }
+  .stage {
+    position: fixed; inset: 0;
+    width: 100vw; height: 100dvh;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
+    background:#fff;
+  }
+  .note {
+    position: fixed; left:50%; bottom: calc(env(safe-area-inset-bottom) + 12px);
+    transform: translateX(-50%);
+    font-size: 14px; color:#000; text-align:center; user-select:none;
+    mix-blend-mode: multiply;
+  }
+  /* ——— Mail butonu: beyaz ——— */
+  .mail-button {
+    position: fixed;
+    left: auto; top: auto; right: 20px; bottom: 20px; /* ilk konum */
+    width: 34px; height: 34px;
+    display: grid; place-items: center;
+    text-decoration: none;
+    background: #fff;
+    color: #000;
+    border-radius: 50%;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+    border: 1px solid rgba(0,0,0,0.15);
+    transition: transform .15s;
+    touch-action: none; /* sürükleme için */
+    user-select: none;
+  }
+  .mail-button:hover { transform: scale(1.06); }
+  .mail-button svg { width: 26px; height: 26px; display:block; }
+  canvas { display:block; }
+</style>
+</head>
+<body>
+  <div id="stage" class="stage"></div>
+  <div class="note">
+    drag: tilt • pinch/scroll: zoom • Space: auto-orbit • Z: reset zoom • Shift+Click/Enter: set center • Q: quantum • C: collapse • R: reseed • ,/.: speckle density
+  </div>
+
+  <!-- Beyaz, fırlatılabilir mail tuşu -->
+  <a id="mailBtn" href="mailto:burakaltiparmak@icloud.com" class="mail-button" aria-label="Send email">
+    <!-- istersen SVG ikon koyabilirsin -->
+  </a>
+
+<script type="module">
+/* ===== Three.js sahnesi — minimal beyaz ışık halkası ===== */
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+const stage = document.getElementById('stage');
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+// Scene & Camera
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 100);
+scene.add(camera);
+let zoom = 1, MIN_ZOOM = 0.35, MAX_ZOOM = 4;
+const baseCamZ = 3.2;
+camera.position.set(0, 0, baseCamZ);
+
+// Lights (kapatıldı; MeshBasic yeterli)
+const hemi = new THREE.HemisphereLight(0xffffff, 0xeaeaea, 0.0);
+const key  = new THREE.DirectionalLight(0xffffff, 0.0);
+const rim  = new THREE.DirectionalLight(0xffffff, 0.0);
+// scene.add(hemi); scene.add(key); scene.add(rim);
+
+/* ===== Light Ring (core + halo) ===== */
+// Çekirdek halka — saf ışık etkisi (ışıklardan bağımsız)
+const coreGeo = new THREE.TorusGeometry(1.0, 0.12, 96, 512);
+const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const ringCore = new THREE.Mesh(coreGeo, coreMat);
+scene.add(ringCore);
+
+// --- Quantum durumları
+let quantumCollapsed = false;
+let lastPointerXY = { x: innerWidth*0.5, y: innerHeight*0.5 };
+
+// Halo — kameraya bakan, additive blend’li yarı saydam shader
+const haloVert = /* glsl */`
+  varying vec2 vUv;
+  void main(){
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+  }
+`;
+
+const haloFrag = /* glsl */`
+  varying vec2 vUv;
+  uniform float uTime, uRadius, uWidth, uGain, uAngle;
+  uniform vec2  uCenter;     // NDC: [-1,1]
+  uniform float uRippleT;    // dalga zamanı (sönümlü)
+  uniform float uQuantum;    // 0/1
+  uniform float uPhase;      // speckle fazı
+  uniform float uDensity;    // speckle yoğunluğu [0.2..1.5]
+  uniform float uSeed;
+
+  float hash21(vec2 p){
+    p = fract(p*vec2(123.34, 345.45));
+    p += dot(p, p+34.345);
+    return fract(p.x*p.y);
+  }
+
+  vec2 rot(vec2 p, float a){
+    float c=cos(a), s=sin(a);
+    return mat2(c,-s,s,c)*p;
+  }
+
+  void main(){
+    vec2 p = vUv*2.0 - 1.0;
+    p = rot(p, uAngle);
+
+    float r = length(p);
+    float radius = uRadius;
+
+    // Gaussian halka profili
+    float ring = exp(-pow((r - radius) * uWidth, 2.0));
+
+    // “her nokta merkez” ağırlığı: seçilen merkeze yakınlık
+    float cm = exp( -12.0 * dot(p - uCenter, p - uCenter) );
+
+    // merkezden sönümlü dalga (gözlem dalgası)
+    float distC = length(p - uCenter);
+    float ripple = 1.0 + 0.08 * sin(14.0*distC - 3.0*uRippleT) * exp(-2.5*distC);
+
+    // kenara doğru fade
+    float fade = smoothstep(1.0, 0.2, r);
+
+    // temel opaklık
+    float a = ring * uGain * fade * mix(1.0, cm, 0.7) * ripple;
+
+    // KUANTUM: halka üzerinde parlayan spekler (olasılık)
+    if(uQuantum > 0.5){
+      float theta = atan(p.y, p.x);             // -pi..pi
+      float n = 220.0 * uDensity;               // “örnek” sayısı
+      float id = floor((theta + 3.14159265) / (6.2831853) * n);
+      float rnd = hash21(vec2(id + floor(uPhase), uSeed));
+      float nearRing = exp(-pow((r - radius) * (uWidth*0.65), 2.0));
+      float blink = step(0.82, rnd);            // ara sıra yan
+      a += nearRing * blink * 0.25 * fade;
+    }
+
+    if(a < 0.002) discard;
+    gl_FragColor = vec4(1.0, 1.0, 1.0, a);
+  }
+`;
+
+const haloMat = new THREE.ShaderMaterial({
+  vertexShader: haloVert,
+  fragmentShader: haloFrag,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  uniforms: {
+    uTime:   { value: 0 },
+    uRadius: { value: 0.78 },
+    uWidth:  { value: 14.0 },
+    uGain:   { value: 0.9 },
+    uAngle:  { value: 0.0 },
+    uCenter: { value: new THREE.Vector2(0.0, 0.0) },
+    uRippleT:{ value: 0.0 },
+    uQuantum:{ value: 0.0 },
+    uPhase:  { value: 0.0 },
+    uDensity:{ value: 0.7 },
+    uSeed:   { value: Math.random()*1000.0 }
+  }
+});
+
+const haloSize = 3.6; // görünür parlamanın çapı
+const halo = new THREE.Mesh(new THREE.PlaneGeometry(haloSize, haloSize), haloMat);
+halo.position.set(0, 0, 0);
+scene.add(halo);
+
+/* ===== Etkileşim ===== */
+let pitch = -0.05, yaw = 0.4;
+let autoOrbit = false;
+const ORBIT_YAW_SPEED = 0.25;
+const ORBIT_PITCH_SPEED = 0.10;
+const KEY_TILT_STEP = 0.07;
+
+let dragging=false, lastX=0, lastY=0;
+let velYaw=0, velPitch=0;
+let inertiaActive=false, inertiaProfile='average';
+const INERTIA_DECAY = { slow:1.6, average:2.8, fast:4.5 };
+const EPS = 1e-4;
+
+function setObjectTransform(){ ringCore.rotation.set(pitch, yaw, 0); }
+setObjectTransform();
+
+addEventListener('keydown', e=>{
+  if (e.key==='ArrowUp')   { pitch -= KEY_TILT_STEP; setObjectTransform(); }
+  if (e.key==='ArrowDown') { pitch += KEY_TILT_STEP; setObjectTransform(); }
+  if (e.key==='ArrowLeft') { yaw   -= KEY_TILT_STEP; setObjectTransform(); }
+  if (e.key==='ArrowRight'){ yaw   += KEY_TILT_STEP; setObjectTransform(); }
+  if (e.code==='Space'){ autoOrbit=!autoOrbit; e.preventDefault(); }
+  if (e.key.toLowerCase()==='s') inertiaProfile='slow';
+  if (e.key.toLowerCase()==='a') inertiaProfile='average';
+  if (e.key.toLowerCase()==='f') inertiaProfile='fast';
+  if (e.key.toLowerCase()==='z'){ zoom=1; camera.position.z = baseCamZ; }
+
+  if (e.key === 'Enter'){
+    setCenterFromClientXY(lastPointerXY.x, lastPointerXY.y);
+  }
+  const k = e.key;
+  if (k === '[') { haloMat.uniforms.uRadius.value -= 0.005; }
+  if (k === ']') { haloMat.uniforms.uRadius.value += 0.005; }
+  if (k === ';') { haloMat.uniforms.uWidth.value  = Math.max(2.0, haloMat.uniforms.uWidth.value - 0.5); }
+  if (k === "'") { haloMat.uniforms.uWidth.value  += 0.5; }
+  if (k === '-') { haloMat.uniforms.uGain.value   = Math.max(0.1, haloMat.uniforms.uGain.value - 0.05); }
+  if (k === '=') { haloMat.uniforms.uGain.value   = Math.min(2.0, haloMat.uniforms.uGain.value + 0.05); }
+
+  if (e.key.toLowerCase() === 'q') { // Quantum toggle
+    haloMat.uniforms.uQuantum.value = 1.0 - haloMat.uniforms.uQuantum.value;
+  }
+  if (e.key.toLowerCase() === 'c') { // Collapse (fazı dondur)
+    quantumCollapsed = !quantumCollapsed;
+  }
+  if (e.key.toLowerCase() === 'r') { // Re-seed
+    haloMat.uniforms.uSeed.value = Math.random()*1000.0;
+  }
+  if (e.key === ',') { // speckle yoğunluğu azalt
+    haloMat.uniforms.uDensity.value = Math.max(0.2, haloMat.uniforms.uDensity.value - 0.1);
+  }
+  if (e.key === '.') { // speckle yoğunluğu artır
+    haloMat.uniforms.uDensity.value = Math.min(1.5, haloMat.uniforms.uDensity.value + 0.1);
+  }
+});
+
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+// Zoom: wheel & pinch
+stage.addEventListener('wheel', ev=>{
+  const scale = Math.exp(-ev.deltaY * 0.001);
+  zoom = clamp(zoom * scale, MIN_ZOOM, MAX_ZOOM);
+  camera.position.z = baseCamZ / zoom;
+  ev.preventDefault();
+}, {passive:false});
+
+// Pointer drag + momentum (3D)
+let lastSamples=[];
+function nowMs(){ return performance.now(); }
+function pushSample(x,y,ts){
+  lastSamples.push({x,y,ts});
+  const cutoff = ts - 80;
+  while (lastSamples.length && lastSamples[0].ts < cutoff) lastSamples.shift();
+}
+
+const activePointers = new Map();
+let pinching=false, startDist=0, baseZoom=zoom;
+function distance(pA,pB){ const dx=pA.x-pB.x, dy=pA.y-pB.y; return Math.hypot(dx,dy); }
+
+function onPointerDown(ev){
+  try{ stage.setPointerCapture(ev.pointerId);}catch{}
+  activePointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+  if (activePointers.size < 2){
+    dragging=true; inertiaActive=false;
+    lastX=ev.clientX; lastY=ev.clientY; lastSamples=[];
+    pushSample(lastX,lastY,nowMs());
+  }
+  ev.preventDefault();
+}
+
+function onPointerMove(ev){
+  lastPointerXY.x = ev.clientX;
+  lastPointerXY.y = ev.clientY;
+  if (activePointers.has(ev.pointerId)){
+    activePointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+  }
+  if (pinching){ handlePinchUpdate(); ev.preventDefault(); return; }
+  if (!dragging) return;
+
+  const x=ev.clientX, y=ev.clientY;
+  const dx=x-lastX, dy=y-lastY;
+  const ts=nowMs();
+
+  const kx = 2*Math.PI / innerHeight;
+  const ky = 2*Math.PI / innerWidth;
+
+  const dPitch = -dy * kx * 0.25;
+  const dYaw   =  dx * ky * 0.25;
+
+  pitch += dPitch; yaw += dYaw; setObjectTransform();
+
+  const prevTs = lastSamples.at(-1)?.ts ?? ts;
+  const dt = Math.max((ts - prevTs)/1000, 1/240);
+  velPitch = dPitch/dt; velYaw = dYaw/dt;
+
+  lastX=x; lastY=y; pushSample(x,y,ts);
+  ev.preventDefault();
+}
+
+function setCenterFromClientXY(x, y){
+  const nx = (x / innerWidth) * 2 - 1;
+  const ny = -((y / innerHeight) * 2 - 1);
+  haloMat.uniforms.uCenter.value.set(nx, ny);
+  haloMat.uniforms.uRippleT.value = 0.0; // dalgayı tazele
+}
+
+function onPointerUp(ev){
+  if (activePointers.has(ev.pointerId)) activePointers.delete(ev.pointerId);
+  if (pinching && activePointers.size<2){ pinching=false; baseZoom=zoom; }
+
+  // Shift + tık ile merkez atama (çoklu dokunma yokken)
+  if (ev.shiftKey && activePointers.size===0){
+    setCenterFromClientXY(ev.clientX, ev.clientY);
+  }
+
+  if (!dragging){ ev.preventDefault(); return; }
+  dragging=false;
+
+  const first=lastSamples[0], last=lastSamples.at(-1);
+  if (first && last && last.ts>first.ts){
+    const dx=last.x-first.x, dy=last.y-first.y, dt=(last.ts-first.ts)/1000;
+    const kx=2*Math.PI/innerHeight, ky=2*Math.PI/innerWidth;
+    velPitch=(-dy*kx*0.25)/dt; velYaw=(dx*ky*0.25)/dt;
+  }
+  inertiaActive=true;
+  try{ stage.releasePointerCapture(ev.pointerId);}catch{}
+  ev.preventDefault();
+}
+
+stage.addEventListener('pointerdown', onPointerDown, {passive:false});
+stage.addEventListener('pointermove', onPointerMove, {passive:false});
+stage.addEventListener('pointerup',   onPointerUp,   {passive:false});
+stage.addEventListener('pointercancel', onPointerUp, {passive:false});
+
+// Pinch (iki parmak)
+function handlePinchUpdate(){
+  if (activePointers.size<2) return;
+  const pts=[...activePointers.values()];
+  const d=distance(pts[0],pts[1]);
+  if (!pinching){
+    pinching=true; startDist=d||1; baseZoom=zoom; dragging=false; inertiaActive=false; return;
+  }
+  const factor = d / (startDist||1);
+  zoom = clamp(baseZoom*factor, MIN_ZOOM, MAX_ZOOM);
+  camera.position.z = baseCamZ / zoom;
+}
+window.addEventListener('gesturestart', e=>{ baseZoom=zoom; e.preventDefault(); }, {passive:false});
+window.addEventListener('gesturechange', e=>{
+  zoom = clamp(baseZoom*e.scale, MIN_ZOOM, MAX_ZOOM);
+  camera.position.z = baseCamZ / zoom; e.preventDefault();
+},{passive:false});
+window.addEventListener('gestureend', e=>{ e.preventDefault(); }, {passive:false});
+
+/* ===== Döngü ===== */
+let lastTs = performance.now();
+function tick(ts){
+  const dt=(ts-lastTs)/1000; lastTs=ts;
+
+  // Zamanlar
+  const t = performance.now() * 0.001;
+  haloMat.uniforms.uTime.value = t;
+
+  // Halo’yu çok yavaş çevir (gökyüzü küresi gibi)
+  haloMat.uniforms.uAngle.value = t * 0.05;
+
+  // Quantum fazı: açık ve çökertilmemişse akıt
+  if (haloMat.uniforms.uQuantum.value > 0.5 && !quantumCollapsed){
+    haloMat.uniforms.uPhase.value = t * 2.0;
+  }
+
+  // Ripple zamanını sönümlü büyüt (merkez atayınca sıfırlanıyor)
+  const R_DECAY = 0.96;
+  haloMat.uniforms.uRippleT.value = haloMat.uniforms.uRippleT.value * R_DECAY + dt*6.0;
+
+  // Halo her karede kameraya baksın (billboard)
+  halo.quaternion.copy(camera.quaternion);
+
+  if (autoOrbit){
+    yaw   += ORBIT_YAW_SPEED   * dt;
+    pitch += ORBIT_PITCH_SPEED * dt;
+    setObjectTransform();
+  }
+
+  if (inertiaActive && !dragging && !autoOrbit && !pinching){
+    pitch += velPitch*dt; yaw += velYaw*dt; setObjectTransform();
+    const lambda = INERTIA_DECAY[inertiaProfile] || INERTIA_DECAY.average;
+    const decay = Math.exp(-lambda*dt);
+    velPitch*=decay; velYaw*=decay;
+    if (Math.abs(velYaw)<EPS && Math.abs(velPitch)<EPS){ inertiaActive=false; velYaw=velPitch=0; }
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// Resize
+addEventListener('resize', ()=>{
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+/* ===== Mail butonu: sürükle, fırlat, zıplat ===== */
+const mailBtn = document.getElementById('mailBtn');
+
+let mbDragging=false, mbStartX=0, mbStartY=0, mbLastX=0, mbLastY=0;
+let mbVX=0, mbVY=0, mbMoving=false, mbWasDrag=false;
+let mbLastT=0;
+const MB_DECAY = 0.0015;          // sürtünme (ms başına)
+const MB_BOUNCE = 0.65;           // kenardan sekme katsayısı
+const CLICK_THRESH = 6;           // px (bundan az hareketse tık say)
+const SAFE = { l:8, t:8, r:8, b:8 }; // kenar tamponları
+
+function mbRect(){ return mailBtn.getBoundingClientRect(); }
+function mbToLeftTop(){
+  const r = mbRect();
+  mailBtn.style.left = `${r.left}px`;
+  mailBtn.style.top  = `${r.top}px`;
+  mailBtn.style.right = 'auto';
+  mailBtn.style.bottom= 'auto';
+}
+
+function mbPointerDown(e){
+  mbToLeftTop();
+  mbDragging=true; mbWasDrag=false; mbMoving=false;
+  mbStartX=e.clientX; mbStartY=e.clientY;
+  mbLastX=e.clientX; mbLastY=e.clientY; mbVX=0; mbVY=0; mbLastT=performance.now();
+  mailBtn.style.transition='none';
+  e.preventDefault();
+}
+function mbPointerMove(e){
+  if(!mbDragging) return;
+  const dx=e.clientX-mbLastX, dy=e.clientY-mbLastY;
+  const now=performance.now(), dt=Math.max(now-mbLastT, 1);
+  mbVX = dx/dt * 16.6;   // px/frame eşleniği
+  mbVY = dy/dt * 16.6;
+  mbLastT=now; mbLastX=e.clientX; mbLastY=e.clientY;
+
+  const r = mbRect();
+  const nx = r.left + dx, ny = r.top + dy;
+  mailBtn.style.left = `${nx}px`;
+  mailBtn.style.top  = `${ny}px`;
+
+  if (!mbWasDrag && Math.hypot(e.clientX-mbStartX, e.clientY-mbStartY) > CLICK_THRESH) {
+    mbWasDrag = true;
+  }
+  e.preventDefault();
+}
+function mbPointerUp(e){
+  if(!mbDragging) return;
+  mbDragging=false;
+
+  if (!mbWasDrag) {
+    mailBtn.click();
+    return;
+  }
+  mbMoving=true;
+  requestAnimationFrame(mbStep);
+  e.preventDefault();
+}
+
+function mbStep(){
+  if(!mbMoving) return;
+  const r = mbRect();
+  let x = r.left, y = r.top;
+  x += mbVX; y += mbVY;
+
+  // sürtünme
+  const decay = Math.exp(-MB_DECAY * 16.6);
+  mbVX *= decay; mbVY *= decay;
+
+  // kenarlar
+  const maxX = innerWidth  - r.width  - SAFE.r;
+  const maxY = innerHeight - r.height - SAFE.b;
+  const minX = SAFE.l, minY = SAFE.t;
+
+  if (x < minX) { x = minX; mbVX = -mbVX * MB_BOUNCE; }
+  if (x > maxX) { x = maxX; mbVX = -mbVX * MB_BOUNCE; }
+  if (y < minY) { y = minY; mbVY = -mbVY * MB_BOUNCE; }
+  if (y > maxY) { y = maxY; mbVY = -mbVY * MB_BOUNCE; }
+
+  mailBtn.style.left = `${x}px`;
+  mailBtn.style.top  = `${y}px`;
+
+  if (Math.hypot(mbVX, mbVY) < 0.25) { mbMoving=false; return; }
+  requestAnimationFrame(mbStep);
+}
+
+mailBtn.addEventListener('pointerdown', mbPointerDown, {passive:false});
+window.addEventListener('pointermove', mbPointerMove, {passive:false});
+window.addEventListener('pointerup',   mbPointerUp,   {passive:false});
+window.addEventListener('pointercancel', mbPointerUp, {passive:false});
+
+// Başlangıç yönü hazır
+</script>
+</body>
+</html>

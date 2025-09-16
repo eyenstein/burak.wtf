@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<title>burak.wtf — center light • inertia + rational breathing</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin:0; padding:0; height:100%; background:#000; }
+  body { display:flex; align-items:center; justify-content:center; font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:#fff; user-select:none; }
+  canvas.stage { position:fixed; inset:0; touch-action:none; }
+
+  /* Bottom bar (yatay menü) — varsayılan AÇIK */
+  .bottom {
+    position: fixed; left:0; right:0; bottom:0;
+    background: rgba(0,0,0,.55);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid rgba(255,255,255,.15);
+    padding: 8px 10px;
+    display: grid; gap: 8px;
+    transform: translateY(0); opacity: 1; pointer-events: auto;
+    transition: transform .25s ease, opacity .25s ease;
+    z-index: 2;
+  }
+
+  .sections {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(260px, 1fr));
+    gap: 8px;
+  }
+  details {
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 10px;
+    overflow: clip;
+    background: rgba(255,255,255,.04);
+  }
+  summary {
+    list-style: none; cursor: pointer;
+    padding: 8px 10px; font-size: 12px; letter-spacing:.02em;
+    display:flex; align-items:center; justify-content:space-between;
+    background: rgba(255,255,255,.05);
+  }
+  summary::-webkit-details-marker { display:none; }
+  .caret { opacity:.7; transition: transform .2s ease; }
+  details[open] .caret { transform: rotate(90deg); }
+  .content { padding: 8px 10px; }
+  .grid3 {
+    display: grid; gap: 10px 12px;
+    grid-template-columns: auto 1fr auto; align-items:center;
+  }
+  .label { opacity:.8; white-space:nowrap; font-size:12px; }
+  input[type="range"] { width:100%; touch-action: pan-y; }
+  .val { font-variant-numeric: tabular-nums; opacity:.8; font-size:12px; }
+  .row { grid-column: 1 / -1; display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; opacity:.85; }
+
+  @media (max-width: 820px){
+    .sections { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c" class="stage"></canvas>
+
+<!-- Bottom menu (varsayılan AÇIK) -->
+<div id="bottom" class="bottom" role="region" aria-label="controls">
+  <div class="sections">
+    <!-- SHAPE -->
+    <details id="shapeSec">
+      <summary>Shape <span class="caret">▶</span></summary>
+      <div class="content grid3">
+        <div class="label">radius</div>
+        <input id="radius" type="range" min="0.25" max="0.60" step="0.005" value="0.42">
+        <div id="radiusVal" class="val">0.42</div>
+
+        <div class="label">inner</div>
+        <input id="inner"  type="range" min="0.00" max="1.00"  step="0.01"  value="0.60">
+        <div id="innerVal" class="val">0.60</div>
+
+        <div class="label">gain (×)</div>
+        <input id="gain"   type="range" min="0.05" max="10.0" step="0.01" value="1.00">
+        <div id="gainVal" class="val">1.00</div>
+      </div>
+    </details>
+
+    <!-- BREATHE -->
+    <details id="breatheSec">
+      <summary>Breathe <span class="caret">▶</span></summary>
+      <div class="content grid3">
+        <div class="label">inhale (s)</div>
+        <input id="tin"  type="range" min="0.0" max="120" step="0.1" value="3.0">
+        <div id="tinVal" class="val">3.0</div>
+
+        <div class="label">exhale (s)</div>
+        <input id="tout" type="range" min="0.0" max="120" step="0.1" value="7.0">
+        <div id="toutVal" class="val">7.0</div>
+
+        <div class="label">gain high</div>
+        <input id="ghi"  type="range" min="0.00" max="20" step="0.01" value="7.77">
+        <div id="ghiVal" class="val">7.77</div>
+
+        <div class="label">gain low</div>
+        <input id="glo"  type="range" min="0.00" max="10" step="0.01" value="0.33">
+        <div id="gloVal" class="val">0.33</div>
+
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:8px;">
+            <input id="rationalChk" type="checkbox" />
+            rational breathing
+          </label>
+          <div id="ratInfo"></div>
+        </div>
+
+        <div class="label">units (0–57)</div>
+        <input id="rationalUnits" type="range" min="0" max="57" step="1" value="0" disabled>
+        <div id="rationalVal" class="val">0</div>
+      </div>
+    </details>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.161.0/build/three.module.js';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000, 1);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 100);
+camera.position.set(0, 0, 3);
+
+/* ================== LIGHT SHADER (tek plane) ================== */
+const ringGroup = new THREE.Group();
+scene.add(ringGroup);
+
+const planeGeo = new THREE.PlaneGeometry(2, 2, 1, 1);
+
+const ringMat = new THREE.ShaderMaterial({
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  uniforms: {
+    uTime: { value: 0 },
+    uRadius: { value: 0.42 },
+    uWidth: { value: 2.5 },
+    uGain: { value: 1.0 },         // breath * gain slider
+    uBrightness: { value: 1.0 },
+    uRingColor: { value: new THREE.Color('#ffffff') },
+    uInnerColor:{ value: new THREE.Color('#BDB76B') }, // DarkKhaki
+    uInnerStrength:{ value: 0.60 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main(){
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    precision highp float;
+    varying vec2 vUv;
+
+    uniform float uTime;
+    uniform float uRadius;
+    uniform float uWidth;
+    uniform float uGain;
+    uniform float uBrightness;
+    uniform vec3  uRingColor;
+    uniform vec3  uInnerColor;
+    uniform float uInnerStrength;
+
+    void main(){
+      vec2 p = vUv - 0.5;
+      float r = length(p) * 2.0;
+
+      // Ring band (yumuşak dar bant)
+      float innerEdge = smoothstep(uRadius - (1.0/uWidth), uRadius, r);
+      float outerEdge = 1.0 - smoothstep(uRadius, uRadius + (0.7/uWidth), r);
+      float ringBand  = innerEdge * outerEdge;
+
+      // İç parıltı (merkeze doğru yumuşak artış)
+      float innerFill = smoothstep(uRadius, 0.0, r);
+      float innerSoft = exp(-pow((uRadius - r) * (uWidth*0.7), 2.0));
+      float innerHaze = clamp(innerFill * innerSoft, 0.0, 1.0);
+
+      // Dış alan tamamen söner
+      float hardCut = 1.0 - smoothstep(uRadius + (0.9/uWidth), uRadius + (1.4/uWidth), r);
+      float mask = max(ringBand, innerFill) * hardCut;
+
+      float aRing  = ringBand;
+      float aInner = innerHaze * uInnerStrength;
+
+      float a = (aRing + aInner) * uGain * clamp(uBrightness, 0.0, 1.0);
+      a *= mask;
+      a = clamp(a, 0.0, 1.0);
+
+      vec3 col = vec3(0.0);
+      col += uRingColor * aRing * 1.0;
+      col += uInnerColor * aInner * 0.9;
+
+      gl_FragColor = vec4(col, a);
+      if (gl_FragColor.a < 0.001) discard;
+    }
+  `
+});
+
+const ringMesh = new THREE.Mesh(planeGeo, ringMat);
+ringMesh.renderOrder = 1;
+ringGroup.add(ringMesh);
+
+/* ================== INTERACTION — İnertial Trackball (merkezden X/Y) ================== */
+let yaw = 0, pitch = 0;         // rad
+let yawVel = 0, pitchVel = 0;   // rad/s
+let distance = 3;
+
+let isDown = false, lastX = 0, lastY = 0, lastMoveT = performance.now();
+
+/* İnce ayarlı ivme ve sürtünme */
+const DRIVE = 14.0;     // hedef hıza yaklaşma (1/s)
+const FRICTION = 0.95;  // sürtünme (1/s)
+const MAX_V = 14.0;     // tavan (rad/s)
+
+const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+function pointerXY(e){
+  if ('clientX' in e) return [e.clientX, e.clientY];
+  if ('touches' in e && e.touches.length) return [e.touches[0].clientX, e.touches[0].clientY];
+  return [0,0];
+}
+
+canvas.addEventListener('pointerdown', (e)=>{
+  isDown = true;
+  canvas.setPointerCapture(e.pointerId);
+  [lastX, lastY] = pointerXY(e);
+  lastMoveT = performance.now();
+});
+canvas.addEventListener('pointermove', (e)=>{
+  if (!isDown) return;
+  const [x,y] = pointerXY(e);
+  const now = performance.now();
+  let dt = (now - lastMoveT)/1000; if (dt <= 0) dt = 1/120;
+  const dx = (x - lastX) / innerWidth;
+  const dy = (y - lastY) / innerHeight;
+  lastX = x; lastY = y; lastMoveT = now;
+
+  const k = Math.PI;
+  const targetYawVel   = Math.max(-MAX_V, Math.min(MAX_V, (-dx * k) / dt));
+  const targetPitchVel = Math.max(-MAX_V, Math.min(MAX_V, (-dy * k * 0.7) / dt));
+
+  const a = 1.0 - Math.exp(-DRIVE * dt);
+  yawVel   += (targetYawVel   - yawVel)   * a;
+  pitchVel += (targetPitchVel - pitchVel) * a;
+});
+canvas.addEventListener('pointerup', (e)=>{
+  isDown = false;
+  canvas.releasePointerCapture(e.pointerId);
+});
+
+/* Wheel / Pinch zoom */
+addEventListener('wheel', (e)=>{
+  distance += Math.sign(e.deltaY) * 0.15;
+  distance = clamp(distance, 1.4, 6.0);
+}, { passive:true });
+let pinchStart = 0;
+canvas.addEventListener('touchstart', (e)=>{
+  if (e.touches.length === 2){
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchStart = Math.hypot(dx, dy);
+  }
+}, { passive:true });
+canvas.addEventListener('touchmove', (e)=>{
+  if (e.touches.length === 2){
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const d  = Math.hypot(dx, dy);
+    const s  = (pinchStart > 0) ? (pinchStart / d) : 1.0;
+    distance = clamp(distance * s, 1.4, 6.0);
+    pinchStart = d;
+  }
+}, { passive:true });
+
+/* ================== CONTROLS ================== */
+const radiusEl = document.getElementById('radius');
+const innerEl  = document.getElementById('inner');
+const gainEl   = document.getElementById('gain');
+const tinEl    = document.getElementById('tin');
+const toutEl   = document.getElementById('tout');
+const ghiEl    = document.getElementById('ghi');
+const gloEl    = document.getElementById('glo');
+
+const radiusVal = document.getElementById('radiusVal');
+const innerVal  = document.getElementById('innerVal');
+const gainVal   = document.getElementById('gainVal');
+const tinVal    = document.getElementById('tinVal');
+const toutVal   = document.getElementById('toutVal');
+const ghiVal    = document.getElementById('ghiVal');
+const gloVal    = document.getElementById('gloVal');
+
+const rationalChk   = document.getElementById('rationalChk');
+const rationalUnits = document.getElementById('rationalUnits');
+const rationalVal   = document.getElementById('rationalVal');
+const ratInfo       = document.getElementById('ratInfo');
+
+function upd(){
+  radiusVal.textContent = (+radiusEl.value).toFixed(2);
+  innerVal .textContent = (+innerEl.value ).toFixed(2);
+  gainVal  .textContent = (+gainEl.value  ).toFixed(2);
+  tinVal   .textContent = (+tinEl.value   ).toFixed(1);
+  toutVal  .textContent = (+toutEl.value  ).toFixed(1);
+  ghiVal   .textContent = (+ghiEl.value   ).toFixed(2);
+  gloVal   .textContent = (+gloEl.value   ).toFixed(2);
+  rationalVal.textContent = rationalUnits.value;
+}
+radiusEl.addEventListener('input', ()=>{ ringMat.uniforms.uRadius.value = parseFloat(radiusEl.value); upd(); });
+innerEl .addEventListener('input', ()=>{ ringMat.uniforms.uInnerStrength.value = parseFloat(innerEl.value); upd(); });
+gainEl  .addEventListener('input', upd);
+tinEl   .addEventListener('input', upd);
+toutEl  .addEventListener('input', upd);
+ghiEl   .addEventListener('input', upd);
+gloEl   .addEventListener('input', upd);
+
+/* Rational breathing toggle/slider (0–57) */
+rationalChk.addEventListener('change', ()=>{
+  const on = rationalChk.checked;
+  rationalUnits.disabled = !on;
+  tinEl.disabled = toutEl.disabled = on;
+  updateRatInfo();
+});
+rationalUnits.addEventListener('input', ()=>{
+  rationalVal.textContent = rationalUnits.value;
+  updateRatInfo();
+});
+function fmtSecs(x){
+  if (x > 3600) return (x/3600).toFixed(1)+'h';
+  if (x > 600)  return (x/60).toFixed(1)+'m';
+  return x.toString()+'s';
+}
+
+/* Fibonacci pair (BigInt): F1=1,F2=1,... ; returns [F_n, F_{n+1}] ; n=0 => [0,0] */
+function fibPair(n){
+  if (n <= 0) return [0n, 0n];
+  let a = 0n, b = 1n;
+  for (let i=1;i<=n;i++){ const t = a + b; a = b; b = t; }
+  return [a, b];
+}
+function bigToNum(bi){
+  const MAX = 1e12;
+  const n = Number(bi);
+  return !Number.isFinite(n) ? MAX : Math.min(n, MAX);
+}
+function updateRatInfo(){
+  const n = parseInt(rationalUnits.value,10);
+  if (!rationalChk.checked){
+    ratInfo.textContent = '';
+    return;
+  }
+  if (n === 0){
+    ratInfo.textContent = 'breathless (sabit)';
+    return;
+  }
+  const [Fi, Fj] = fibPair(n); // Fi=F_n, Fj=F_{n+1}
+  const i = bigToNum(Fi), j = bigToNum(Fj);
+  ratInfo.textContent = `N=${n} → inhale=${fmtSecs(i)} • exhale=${fmtSecs(j)}`;
+}
+
+/* ================== BREATH ENGINE ================== */
+function breathGain(t, tin, tout, lo, hi){
+  tin  = Math.max(0.0, tin);
+  tout = Math.max(0.0, tout);
+  const T = tin + tout;
+  if (T < 1e-6){
+    return (lo + hi) * 0.5; // breathless: sabit
+  }
+  const ph = t % T;
+  if (ph < tin){ // inhale: lo -> hi
+    const u = ph / tin;
+    return lo + (hi - lo) * u;
+  } else {       // exhale: hi -> lo
+    const u = (ph - tin) / tout;
+    return hi + (lo - hi) * u;
+  }
+}
+
+/* ================== ANIMATE ================== */
+const clock = new THREE.Clock();
+function tick(){
+  const t  = clock.getElapsedTime();
+  const dt = clock.getDelta();
+
+  // Sürtünme sönümü
+  const decay = Math.exp(-FRICTION * dt);
+  yawVel   *= decay;
+  pitchVel *= decay;
+
+  // Konuma entegrasyon
+  yaw   += yawVel   * dt;
+  pitch += pitchVel * dt;
+  pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+
+  // Uygula
+  ringGroup.rotation.set(pitch, yaw, 0);
+  camera.position.set(0, 0, distance);
+  camera.lookAt(0, 0, 0);
+
+  // Breathe (rational açıksa inhale/exhale override)
+  let tin = parseFloat(tinEl.value);
+  let tout= parseFloat(toutEl.value);
+  if (rationalChk.checked){
+    const n = parseInt(rationalUnits.value,10);
+    if (n === 0){ tin = 0; tout = 0; }
+    else {
+      const [Fi, Fj] = fibPair(n);
+      tin  = bigToNum(Fi);
+      tout = bigToNum(Fj);
+    }
+  }
+  const lo  = parseFloat(gloEl.value);
+  const hi  = parseFloat(ghiEl.value);
+  const gMul= parseFloat(gainEl.value);
+
+  const gBreath = breathGain(t, tin, tout, lo, hi);
+  ringMat.uniforms.uGain.value = gBreath * gMul;
+
+  // hafif taban parıltısı
+  ringMat.uniforms.uBrightness.value = 1.0 + 0.02 * Math.sin(t * 0.6);
+  ringMat.uniforms.uTime.value = t;
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+/* Resize */
+addEventListener('resize', ()=>{
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+/* Başlangıç: menü bar açık, ancak bölümler kapalı; UI metinleri yaz */
+document.getElementById('shapeSec').open = false;
+document.getElementById('breatheSec').open = false;
+(function initUI(){
+  ringMat.uniforms.uRadius.value = parseFloat(radiusEl.value);
+  ringMat.uniforms.uInnerStrength.value = parseFloat(innerEl.value);
+  (function updOnce(){
+    const radiusVal = document.getElementById('radiusVal');
+    const innerVal  = document.getElementById('innerVal');
+    const gainVal   = document.getElementById('gainVal');
+    const tinVal    = document.getElementById('tinVal');
+    const toutVal   = document.getElementById('toutVal');
+    const ghiVal    = document.getElementById('ghiVal');
+    const gloVal    = document.getElementById('gloVal');
+    radiusVal.textContent = (+radiusEl.value).toFixed(2);
+    innerVal .textContent = (+innerEl.value ).toFixed(2);
+    gainVal  .textContent = (+gainEl.value  ).toFixed(2);
+    tinVal   .textContent = (+tinEl.value   ).toFixed(1);
+    toutVal  .textContent = (+toutEl.value  ).toFixed(1);
+    ghiVal   .textContent = (+ghiEl.value   ).toFixed(2);
+    gloVal   .textContent = (+gloEl.value   ).toFixed(2);
+    document.getElementById('rationalVal').textContent = rationalUnits.value;
+  })();
+  (function updateRatInfoInit(){
+    const n = parseInt(rationalUnits.value,10);
+    const ratInfo = document.getElementById('ratInfo');
+    if (n === 0) ratInfo.textContent = '';
+  })();
+})();
+</script>
+</body>
+</html>
