@@ -1,1 +1,58 @@
-<!doctypehtml><html lang=en><head><meta charset=utf-8><title>t0kenumbers</title><meta content="width=device-width,initial-scale=1,viewport-fit=cover"name=viewport><style>body,html{margin:0;padding:0;height:100%;background:#111}#canvas{width:100%;height:100vh;display:block;touch-action:none}@supports (-webkit-touch-callout:none){#canvas{height:-webkit-fill-available}}</style></head><body><canvas id=canvas oncontextmenu=event.preventDefault()></canvas><script>var Module={canvas:document.getElementById("canvas")}</script><script>"exitPointerLock"in document||(document.exitPointerLock=function(){}),"requestPointerLock"in HTMLCanvasElement.prototype||(HTMLCanvasElement.prototype.requestPointerLock=function(){})</script><script async src=index.js></script><script>window.addEventListener("error",(function(e){const n=document.createElement("pre");n.style.cssText="position:fixed;left:0;top:0;right:0;background:#200;color:#f88;padding:8px;white-space:pre-wrap;z-index:99999;font:12px monospace",n.textContent="Error: "+e.message+"\n"+(e.filename||"")+":"+(e.lineno||"")+":"+(e.colno||""),document.body.appendChild(n)})),window.addEventListener("unhandledrejection",(function(e){const n=document.createElement("pre");n.style.cssText="position:fixed;left:0;top:0;right:0;background:#220;color:#ff8;padding:8px;white-space:pre-wrap;z-index:99999;font:12px monospace;top:auto;bottom:0",n.textContent="Unhandled promise rejection: "+(e.reason&&(e.reason.stack||e.reason.message||e.reason)),document.body.appendChild(n)}))</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>t0kenumbers</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <style>
+    html,body{margin:0;padding:0;height:100%;background:#111;overscroll-behavior:none}
+    #canvas{width:100%;height:100dvh;display:block;touch-action:none}
+    @supports (-webkit-touch-callout:none){ #canvas{height:-webkit-fill-available} }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+
+  <!-- Hata görünürlüğü (yardımcı) -->
+  <script>
+    window.addEventListener("error", function(e){
+      const n=document.createElement("pre");
+      n.style.cssText="position:fixed;left:0;top:0;right:0;background:#200;color:#f88;padding:8px;white-space:pre-wrap;z-index:99999;font:12px monospace";
+      n.textContent="Error: "+e.message+"\n"+(e.filename||"")+":"+(e.lineno||"")+":"+(e.colno||"");
+      document.body.appendChild(n);
+    });
+    window.addEventListener("unhandledrejection", function(e){
+      const n=document.createElement("pre");
+      n.style.cssText="position:fixed;left:0;right:0;bottom:0;background:#220;color:#ff8;padding:8px;white-space:pre-wrap;z-index:99999;font:12px monospace";
+      n.textContent="Unhandled promise rejection: "+(e.reason&&(e.reason.stack||e.reason.message||e.reason));
+      document.body.appendChild(n);
+    });
+  </script>
+
+  <!-- Pointer lock polyfill (opsiyonel) -->
+  <script>
+    if(!("exitPointerLock" in document)) document.exitPointerLock=function(){};
+    if(!("requestPointerLock" in HTMLCanvasElement.prototype))
+      HTMLCanvasElement.prototype.requestPointerLock=function(){};
+  </script>
+
+  <!-- Module + locateFile (WASM yolu buradan çözülür) -->
+  <script>
+    (function () {
+      var base = location.pathname.endsWith('/')
+        ? location.pathname
+        : location.pathname.replace(/[^\/]+$/, '/');
+
+      var c = document.getElementById('canvas');
+
+      window.Module = {
+        canvas: c,
+        locateFile: function (path) { return base + path; } // /apps/t0kenumbers/index.wasm
+      };
+    })();
+  </script>
+
+  <!-- Emscripten çıkışı TEK KEZ yükle -->
+  <script src="index.js" defer></script>
+</body>
+</html>
