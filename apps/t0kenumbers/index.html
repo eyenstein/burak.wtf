@@ -5,54 +5,74 @@
   <title>t0kenumbers</title>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <style>
-    html,body{margin:0;padding:0;height:100%;background:#111;overscroll-behavior:none}
+    html,body{margin:0;height:100%;background:#111;overscroll-behavior:none}
     #canvas{width:100%;height:100dvh;display:block;touch-action:none}
     @supports (-webkit-touch-callout:none){ #canvas{height:-webkit-fill-available} }
+    .diag{position:fixed;left:0;right:0;z-index:99999;font:12px/1.4 monospace;white-space:pre-wrap}
+    .diag.top{top:0;background:#200;color:#f88;padding:8px}
+    .diag.bottom{bottom:0;background:#220;color:#ff8;padding:8px}
   </style>
 </head>
 <body>
   <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
 
-  <!-- Hata görünürlüğü (yardımcı) -->
+  <!-- Hata görünürlüğü -->
   <script>
     window.addEventListener("error", function(e){
-      const n=document.createElement("pre");
-      n.style.cssText="position:fixed;left:0;top:0;right:0;background:#200;color:#f88;padding:8px;white-space:pre-wrap;z-index:99999;font:12px monospace";
+      const n=document.createElement("pre"); n.className="diag top";
       n.textContent="Error: "+e.message+"\n"+(e.filename||"")+":"+(e.lineno||"")+":"+(e.colno||"");
       document.body.appendChild(n);
     });
     window.addEventListener("unhandledrejection", function(e){
-      const n=document.createElement("pre");
-      n.style.cssText="position:fixed;left:0;right:0;bottom:0;background:#220;color:#ff8;padding:8px;white-space:pre-wrap;z-index:99999;font:12px monospace";
+      const n=document.createElement("pre"); n.className="diag bottom";
       n.textContent="Unhandled promise rejection: "+(e.reason&&(e.reason.stack||e.reason.message||e.reason));
       document.body.appendChild(n);
     });
   </script>
 
-  <!-- Pointer lock polyfill (opsiyonel) -->
   <script>
-    if(!("exitPointerLock" in document)) document.exitPointerLock=function(){};
-    if(!("requestPointerLock" in HTMLCanvasElement.prototype))
-      HTMLCanvasElement.prototype.requestPointerLock=function(){};
-  </script>
+    // ABSOLUTE BASE — GH Pages + custom domain + alt klasör için güvenli
+    const ABS_BASE = "/apps/t0kenumbers/";
 
-  <!-- Module + locateFile (WASM yolu buradan çözülür) -->
-  <script>
-    (function () {
-      var base = location.pathname.endsWith('/')
-        ? location.pathname
-        : location.pathname.replace(/[^\/]+$/, '/');
+    // Emscripten Module — kesin yol + debug hook'ları
+    window.Module = {
+      canvas: document.getElementById("canvas"),
+      locateFile: function (path) { return ABS_BASE + path; }, // index.wasm => /apps/t0kenumbers/index.wasm
+      print: (function(){
+        const n=document.createElement("pre"); n.className="diag top"; n.style.background="#024"; n.style.color="#adf"; document.body.appendChild(n);
+        return function(x){ n.textContent = (n.textContent + "\n" + x).slice(-4000); };
+      })(),
+      printErr: (function(){
+        const n=document.createElement("pre"); n.className="diag top"; n.style.background="#402"; n.style.color="#f8c"; document.body.appendChild(n);
+        return function(x){ n.textContent = (n.textContent + "\n" + x).slice(-4000); };
+      })(),
+      onAbort: function (reason) {
+        const n=document.createElement("pre"); n.className="diag bottom";
+        n.textContent="ABORT: "+reason;
+        document.body.appendChild(n);
+      }
+    };
 
-      var c = document.getElementById('canvas');
-
-      window.Module = {
-        canvas: c,
-        locateFile: function (path) { return base + path; } // /apps/t0kenumbers/index.wasm
-      };
+    // WASM preflight (HEAD) — 404/403/MIME hızlı teşhis
+    (async function(){
+      try {
+        const url = ABS_BASE + "index.wasm";
+        const r = await fetch(url, { method:"HEAD", cache:"no-store" });
+        if (!r.ok) {
+          const n=document.createElement("pre"); n.className="diag bottom";
+          n.textContent = "Preflight: " + url + " => " + r.status + " " + r.statusText + "\n" +
+                          "Eğer 404 ise dosya adı/konumu yanlış. 403 ise izin/CDN. 200 ise MIME çoğu zaman OK (GH Pages).";
+          document.body.appendChild(n);
+        }
+      } catch (e) {
+        const n=document.createElement("pre"); n.className="diag bottom";
+        n.textContent = "Preflight fetch failed: " + (e && (e.stack||e.message||e));
+        document.body.appendChild(n);
+      }
     })();
   </script>
 
-  <!-- Emscripten çıkışı TEK KEZ yükle -->
-  <script src="index.js" defer></script>
+  <!-- Emscripten çıkışı — cache buster ile eski JS'i bypass et -->
+  <script src="/apps/t0kenumbers/index.js?v=build-20250917-1" defer></script>
 </body>
 </html>
