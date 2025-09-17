@@ -253,7 +253,10 @@
 					"$(SRCROOT)/../imgui",
 					/opt/homebrew/include,
 				);
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/../Frameworks",
+					"$(inherited)",
+				);
 				LIBRARY_SEARCH_PATHS = /opt/homebrew/opt/glfw/lib;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.5;
@@ -316,7 +319,10 @@
 					"$(SRCROOT)/../imgui",
 					/opt/homebrew/include,
 				);
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/../Frameworks",
+					"$(inherited)",
+				);
 				LIBRARY_SEARCH_PATHS = /opt/homebrew/opt/glfw/lib;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.5;
@@ -335,7 +341,10 @@
 					"$(SRCROOT)/../imgui",
 					/opt/homebrew/include,
 				);
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/../Frameworks",
+					"$(inherited)",
+				);
 				LIBRARY_SEARCH_PATHS = /opt/homebrew/opt/glfw/lib;
 				OTHER_LDFLAGS = "-Wl,-rpath,@executable_path/../Frameworks";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -350,7 +359,10 @@
 					"$(SRCROOT)/../imgui",
 					/opt/homebrew/include,
 				);
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"@executable_path/../Frameworks",
+					"$(inherited)",
+				);
 				LIBRARY_SEARCH_PATHS = /opt/homebrew/opt/glfw/lib;
 				OTHER_LDFLAGS = "-Wl,-rpath,@executable_path/../Frameworks";
 				PRODUCT_NAME = "$(TARGET_NAME)";

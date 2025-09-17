@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>if you don't mind</title>
+<meta name="viewport"
+  content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style>
+  html, body { margin: 0; padding: 0; height:100%; background:#fff; }
+  body {
+    display:flex; align-items:center; justify-content:center;
+    font-family: Helvetica, Arial, sans-serif;
+    min-height: -webkit-fill-available;
+  }
+  .stage {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+    perspective: 900px;
+    overflow: hidden;
+    touch-action: none;        /* pan/pinch tarayıcı jestlerini kapat */
+    overscroll-behavior: none;
+  }
+  .note {
+    position: fixed;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom) + 12px);
+    transform: translateX(-50%);
+    font-size: 14px;
+    color: #000;
+    text-align: center;
+    user-select: none;
+  }
+  .ring {
+    position:absolute; left:50%; top:50%;
+    transform: translate(-50%, -50%);
+    transform-style: preserve-3d;
+  }
+  .ch {
+    position:absolute; top:0; left:0;
+    line-height:1; color:#000; white-space:pre;
+    transform-origin:50% 50%;
+    will-change: transform, opacity;
+  }
+  .mail-button {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    font-size: 32px;
+    text-decoration: none;
+    background: #000;
+    color: #fff;
+    padding: 12px;
+    border-radius: 50%;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    transition: transform 0.2s;
+  }
+  .mail-button:hover { transform: scale(1.1); }
+</style>
+</head>
+<body>
+  <div id="stage" class="stage">
+    <div id="ring" class="ring"></div>
+  </div>
+  <div class="note">
+    drag: tilt • pinch/scroll: zoom • Space: auto-orbit • Z: reset zoom
+  </div>
+  <a href="mailto:burakaltiparmak@icloud.com" class="mail-button"></a>
+
+<script>
+  // ====== AYARLAR ======
+  const TEXT = "     I ' m   h e r e   j u s t   h a v i n g    f  u n  ";
+  const RADIUS_FACTOR = 0.55;
+  const BASE_FONT = 48;         // px
+  let   SPEED_PX = 60;          // piksel/sn
+  const FILL = 2;
+  const FADE_MULT = 0;
+
+  // Global halka yönelimi (radyan)
+  let pitch = 0;
+  let yaw   = 0;
+  let autoOrbit = false;
+  const ORBIT_YAW_SPEED   = 0.25;
+  const ORBIT_PITCH_SPEED = 0.10;
+  const KEY_TILT_STEP = 0.07;
+
+  // ====== ZOOM (YENİ) ======
+  let zoom = 1;
+  const MIN_ZOOM = 0.3;
+  const MAX_ZOOM = 4;
+
+  const stage = document.getElementById('stage');
+  const ring  = document.getElementById('ring');
+
+  // ===== İnertia değişkenleri =====
+  let velYaw = 0, velPitch = 0;
+  let inertiaActive = false;
+  let inertiaProfile = 'average';
+  const INERTIA_DECAY = { slow:1.6, average:2.8, fast:4.5 };
+  const EPS = 1e-4;
+
+  let ORBIT_RADIUS = 0;
+
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+  function setRingTransform() {
+    ring.style.transform =
+      `translate(-50%, -50%) rotateX(${pitch}rad) rotateY(${yaw}rad) translateZ(${ORBIT_RADIUS}px) scale(${zoom})`;
+  }
+
+  function layout() {
+    ring.innerHTML = "";
+
+    const W = innerWidth, H = innerHeight;
+    const R = Math.min(W, H) * RADIUS_FACTOR;
+    const L = Math.PI * R * FILL;
+    const chars = [...TEXT];
+    ORBIT_RADIUS = R;
+
+    // Ölçüm için gizli ölçer
+    const meas = document.createElement('span');
+    Object.assign(meas.style, {
+      position:'absolute', visibility:'hidden', whiteSpace:'pre',
+      fontFamily:'Helvetica, Arial, sans-serif', fontSize: BASE_FONT+'px'
+    });
+    document.body.appendChild(meas);
+
+    const widths = chars.map(c => { meas.textContent = c; return meas.offsetWidth || 0; });
+    const sumWidth = widths.reduce((a,b)=>a+b,0);
+
+    const fontScale = (sumWidth === 0) ? 1 : (L / sumWidth);
+    const fontPx = BASE_FONT * fontScale;
+    document.body.removeChild(meas);
+
+    // Span'lar
+    const spans = chars.map(c => {
+      const s = document.createElement('span');
+      s.className = 'ch';
+      s.textContent = c;
+      s.style.fontSize = fontPx + 'px';
+      ring.appendChild(s);
+      return s;
+    });
+
+    // Ölçeklenmiş genişlikleri tekrar ölç
+    const meas2 = document.createElement('span');
+    Object.assign(meas2.style, {
+      position:'absolute', visibility:'hidden', whiteSpace:'pre',
+      fontFamily:'Helvetica, Arial, sans-serif', fontSize: fontPx+'px'
+    });
+    document.body.appendChild(meas2);
+    const w2 = chars.map(c => { meas2.textContent = c; return meas2.offsetWidth || 0; });
+    document.body.removeChild(meas2);
+
+    // Merkezden merkeze doğrusal konumlar
+    const centers = [];
+    let acc = 0;
+    for (let i=0; i<chars.length; i++){
+      const prevW = (i === 0) ? 0 : w2[i-1];
+      acc += (prevW/2) + (w2[i]/2);
+      centers.push(acc);
+    }
+    const totalLen = centers[centers.length - 1] + w2[w2.length - 1]/2;
+
+    let phase = 0; // 0..totalLen
+    let lastTs = performance.now();
+
+    setRingTransform(); // ilk yönelimi uygula
+
+    function frame(ts){
+      const dt = (ts - lastTs) / 1000; lastTs = ts;
+
+      // Lineer kaydırma
+      phase = (phase + SPEED_PX * dt) % totalLen;
+
+      // Auto-orbit
+      if (autoOrbit) {
+        yaw   += ORBIT_YAW_SPEED   * dt;
+        pitch += ORBIT_PITCH_SPEED * dt;
+        setRingTransform();
+      }
+
+      // İnertia akışı
+      if (inertiaActive && !dragging && !autoOrbit && !pinching) {
+        yaw   += velYaw   * dt;
+        pitch += velPitch * dt;
+
+        const lambda = INERTIA_DECAY[inertiaProfile] || INERTIA_DECAY.average;
+        const decay = Math.exp(-lambda * dt);
+        velYaw   *= decay;
+        velPitch *= decay;
+
+        if (Math.abs(velYaw) < EPS && Math.abs(velPitch) < EPS) {
+          inertiaActive = false;
+          velYaw = velPitch = 0;
+        }
+        setRingTransform();
+      }
+
+      // === PERSPEKTİF TELAFİLİ TRANSFORM ===
+      const pStr = getComputedStyle(stage).perspective;
+      const P = (/^\d/.test(pStr)) ? parseFloat(pStr) : 900;
+
+      for (let i=0; i<spans.length; i++){
+        let s = (centers[i] + phase) % totalLen;
+        s -= totalLen/2;
+
+        const theta = (s / R);
+        const x = R * Math.sin(theta);
+        const z = R * (1 - Math.cos(theta));
+        const rotYdeg = theta * (180/Math.PI);
+
+        // Fade (opsiyonel)
+        let opacity = 1;
+        if (FADE_MULT > 0){
+          const edge = Math.min(1, Math.abs(theta) / (Math.PI/2));
+          opacity = 1 - Math.min(1, edge * 0.8 * FADE_MULT);
+        }
+
+        // Sabit görünen boy
+        const compensate = (P + z) / P;
+
+        const el = spans[i];
+        el.style.opacity = opacity;
+        el.style.transform = `
+          translate3d(${x}px, 0px, ${-z}px)
+          rotateY(${rotYdeg}deg)
+          scale(${compensate})
+        `;
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  layout();
+  addEventListener('resize', layout);
+
+  // --- Klavye kontrolleri ---
+  addEventListener('keydown', e => {
+    if (e.key === '0') SPEED_PX = Math.max(10, SPEED_PX - 10);
+    if (e.key === '1') SPEED_PX += 10;
+    if (e.key.toLowerCase() === 'r') SPEED_PX *= -1;
+
+    if (e.key === 'ArrowUp')   { pitch -= KEY_TILT_STEP; setRingTransform(); }
+    if (e.key === 'ArrowDown') { pitch += KEY_TILT_STEP; setRingTransform(); }
+    if (e.key === 'ArrowLeft') { yaw   -= KEY_TILT_STEP; setRingTransform(); }
+    if (e.key === 'ArrowRight'){ yaw   += KEY_TILT_STEP; setRingTransform(); }
+
+    if (e.code === 'Space') { autoOrbit = !autoOrbit; e.preventDefault(); }
+
+    if (e.key.toLowerCase() === 's') inertiaProfile = 'slow';
+    if (e.key.toLowerCase() === 'a') inertiaProfile = 'average';
+    if (e.key.toLowerCase() === 'f') inertiaProfile = 'fast';
+
+    if (e.key.toLowerCase() === 'z') { zoom = 1; setRingTransform(); } // reset zoom
+  });
+
+  // ===== Pointer tabanlı sürükleme + momentum =====
+  let dragging = false;
+  let lastX = 0, lastY = 0;
+  let lastSamples = []; // {x,y,ts}
+
+  function nowMs() { return performance.now(); }
+  function pushSample(x, y, ts) {
+    lastSamples.push({ x, y, ts });
+    const cutoff = ts - 80;
+    while (lastSamples.length && lastSamples[0].ts < cutoff) lastSamples.shift();
+  }
+
+  function onPointerDown(ev) {
+    try { stage.setPointerCapture(ev.pointerId); } catch {}
+    // Pinch modunda iki parmakla başlarken sürükleme başlatmayacağız
+    activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (activePointers.size < 2) {
+      dragging = true;
+      inertiaActive = false;
+      lastX = ev.clientX; lastY = ev.clientY;
+      lastSamples = [];
+      pushSample(lastX, lastY, nowMs());
+    }
+    if (ev.cancelable) ev.preventDefault();
+  }
+
+  function onPointerMove(ev) {
+    // Pinch varsa önce onu işle
+    if (activePointers.has(ev.pointerId)) {
+      activePointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    }
+    if (pinching) {
+      handlePinchUpdate();
+      if (ev.cancelable) ev.preventDefault();
+      return;
+    }
+
+    if (!dragging) return;
+    const x = ev.clientX, y = ev.clientY;
+    const dx = x - lastX;
+    const dy = y - lastY;
+    const ts = nowMs();
+
+    const kx = 2*Math.PI / innerHeight;
+    const ky = 2*Math.PI / innerWidth;
+
+    const dPitch = -dy * kx * 0.25;
+    const dYaw   =  dx * ky * 0.25;
+
+    pitch += dPitch;
+    yaw   += dYaw;
+    setRingTransform();
+
+    const prevTs = lastSamples.at(-1)?.ts ?? ts;
+    const dt = Math.max((ts - prevTs) / 1000, 1/240);
+    velPitch = dPitch / dt;
+    velYaw   = dYaw   / dt;
+
+    lastX = x; lastY = y;
+    pushSample(x, y, ts);
+
+    if (ev.cancelable) ev.preventDefault();
+  }
+
+  function onPointerUp(ev) {
+    // Pinch’ten çıkış
+    if (activePointers.has(ev.pointerId)) {
+      activePointers.delete(ev.pointerId);
+    }
+    if (pinching && activePointers.size < 2) {
+      pinching = false;
+      baseZoom = zoom;
+    }
+
+    if (!dragging) return;
+    dragging = false;
+
+    // Son 80ms’ten ortalama hız
+    const first = lastSamples[0];
+    const last  = lastSamples.at(-1);
+    if (first && last && last.ts > first.ts) {
+      const dx = last.x - first.x;
+      const dy = last.y - first.y;
+      const dt = (last.ts - first.ts) / 1000;
+
+      const kx = 2*Math.PI / innerHeight;
+      const ky = 2*Math.PI / innerWidth;
+
+      const dPitch = -dy * kx * 0.25;
+      const dYaw   =  dx * ky * 0.25;
+
+      velPitch = dPitch / dt;
+      velYaw   = dYaw   / dt;
+    }
+
+    inertiaActive = true;
+    try { stage.releasePointerCapture(ev.pointerId); } catch {}
+    if (ev.cancelable) ev.preventDefault();
+  }
+
+  stage.addEventListener('pointerdown', onPointerDown,  { passive:false });
+  stage.addEventListener('pointermove', onPointerMove,  { passive:false });
+  stage.addEventListener('pointerup',   onPointerUp,    { passive:false });
+  stage.addEventListener('pointercancel', onPointerUp,  { passive:false });
+
+  // === Tap/click hız kısayolları ===
+  let tapCount = 0, tapTimer;
+  function handleTap() {
+    tapCount++;
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => {
+      if (tapCount === 1) {
+        SPEED_PX = Math.max(10, SPEED_PX - 10);
+      } else if (tapCount === 2) {
+        SPEED_PX *= -1;
+      } else if (tapCount === 3) {
+        SPEED_PX += 10;
+      }
+      tapCount = 0;
+    }, 300);
+  }
+  stage.addEventListener('pointerup', () => handleTap(), { passive:true });
+
+  // ====== WHEEL ZOOM (PC / Mac touchpad pinch) ======
+  stage.addEventListener('wheel', (ev) => {
+    // Mac touchpad pinch çoğu tarayıcıda ctrlKey=true ile wheel üretir
+    // Biz her durumda sahnede zoom yapıyoruz.
+    const scale = Math.exp(-ev.deltaY * 0.001); // yumuşak logaritmik ölçek
+    zoom = clamp(zoom * scale, MIN_ZOOM, MAX_ZOOM);
+    setRingTransform();
+    ev.preventDefault();
+  }, { passive:false });
+
+  // ====== İKİ PARMAK PINCH (iPhone / iPad / Mac) ======
+  const activePointers = new Map(); // id -> {x,y}
+  let pinching = false;
+  let startDist = 0;
+  let baseZoom = zoom;
+
+  function distance(pA, pB){
+    const dx = pA.x - pB.x, dy = pA.y - pB.y;
+    return Math.hypot(dx, dy);
+  }
+
+  function handlePinchUpdate(){
+    if (activePointers.size < 2) return;
+    const pts = [...activePointers.values()];
+    const d = distance(pts[0], pts[1]);
+
+    if (!pinching) {
+      // iki parmak olduysa pinch’e geç
+      pinching = true;
+      startDist = d || 1;
+      baseZoom = zoom;
+      dragging = false; // iki parmakta döndürmeyi bırak
+      inertiaActive = false;
+      return;
+    }
+    const factor = d / (startDist || 1);
+    zoom = clamp(baseZoom * factor, MIN_ZOOM, MAX_ZOOM);
+    setRingTransform();
+  }
+
+  // (Opsiyonel) iOS Safari’nin eski gesture event’leri — varsa destekle
+  // Böylece bazı cihazlarda daha akıcı olabilir; yoksa görmezden gelinir.
+  window.addEventListener('gesturestart', e => {
+    baseZoom = zoom;
+    if (e.cancelable) e.preventDefault();
+  }, { passive:false });
+  window.addEventListener('gesturechange', e => {
+    zoom = clamp(baseZoom * e.scale, MIN_ZOOM, MAX_ZOOM);
+    setRingTransform();
+    if (e.cancelable) e.preventDefault();
+  }, { passive:false });
+  window.addEventListener('gestureend', e => {
+    if (e.cancelable) e.preventDefault();
+  }, { passive:false });
+</script>
+</body>
+</html>
