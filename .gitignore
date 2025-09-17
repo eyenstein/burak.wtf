@@ -4,3 +4,4 @@
 # Xcode noise
 xcuserdata/
 *.xcuserstate
+emsdk/
