@@ -20,5 +20,20 @@
     };
   </script>
   {{{ SCRIPT }}}
+  
+  <script>
+      window.addEventListener('error', function(e){
+        const d=document.createElement('pre');
+        d.style.cssText='position:fixed;left:0;top:0;right:0;background:#200;color:#f88;padding:8px;white-space:pre-wrap;z-index:99999;font:12px monospace';
+        d.textContent='Error: '+ e.message + '\n' + (e.filename||'') + ':' + (e.lineno||'') + ':' + (e.colno||'');
+        document.body.appendChild(d);
+      });
+      window.addEventListener('unhandledrejection', function(e){
+        const d=document.createElement('pre');
+        d.style.cssText='position:fixed;left:0;top:0;right:0;background:#220;color:#ff8;padding:8px;white-space:pre-wrap;z-index:99999;font:12px monospace;top:auto;bottom:0';
+        d.textContent='Unhandled promise rejection: ' + (e.reason && (e.reason.stack||e.reason.message||e.reason));
+        document.body.appendChild(d);
+      });
+    </script>
 </body>
 </html>
