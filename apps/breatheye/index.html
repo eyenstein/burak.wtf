@@ -71,6 +71,40 @@
   </div>
   <div id="ghost" class="ghost"></div>
 </div>
+<script>
+(function makeInstallable(){
+  try{
+    // 1) Manifest (Blob)
+    const manifest = {
+      name: "ALL•SEEING•EYE — lightv1",
+      short_name: "lightv1",
+      start_url: ".",
+      display: "standalone",
+      background_color: "#0b1220",
+      theme_color: "#0b1220",
+      icons: [
+        // İstersen gerçek PNG data URI ekleyebiliriz; boş da çalışır.
+        { src: "data:image/png;base64,iVBORw0KGgo=", sizes: "192x192", type: "image/png" }
+      ]
+    };
+    const murl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:"application/manifest+json"}));
+    const link = document.createElement("link");
+    link.rel = "manifest"; link.href = murl; document.head.appendChild(link);
+
+    // 2) Service Worker (offline cache, sadece localhost/https’te çalışır)
+    if ("serviceWorker" in navigator) {
+      const swCode =
+        "const NAME='lightv1-cache-v1';" +
+        "self.addEventListener('install',e=>{e.waitUntil(caches.open(NAME).then(c=>c.addAll(['./'])))});" +
+        "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==NAME).map(k=>caches.delete(k))))) });" +
+        "self.addEventListener('fetch',e=>{const u=new URL(e.request.url); if(e.request.method!=='GET') return;" +
+        "e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{ const copy=res.clone(); caches.open(NAME).then(c=>{ if(u.origin===location.origin){ c.put(e.request, copy);} }); return res; }))) });";
+      const swUrl = URL.createObjectURL(new Blob([swCode], {type:"text/javascript"}));
+      navigator.serviceWorker.register(swUrl).catch(console.warn);
+    }
+  }catch(err){ console.warn('PWA setup failed:', err); }
+})();
+</script>
 
 <script>
 'use strict';
