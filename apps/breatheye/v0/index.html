@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,28 +10,12 @@
   html,body{margin:0;height:100%;background:#0b1220;overscroll-behavior:none}
   canvas{display:block;width:100vw;height:100vh;touch-action:none}
   .hud{position:fixed;inset:0;pointer-events:none}
-
-  /* MENU BUTTON — bottom-right, notch/safe-area aware */
-  .btn{
-    position:fixed;
-    left:auto; right:14px;
-    top:auto;  bottom:calc(env(safe-area-inset-bottom) + 14px);
-    width:26px;height:20px;
-    cursor:pointer;pointer-events:auto;z-index:10000;
-  }
-  .btn span, .btn:before, .btn:after{
-    content:"";display:block;height:2px;background:#e7ebf3;margin:6px 0;border-radius:2px;opacity:.9
-  }
-
-  .panel{
-    position:fixed;left:14px;top:50px;min-width:260px;max-width:min(92vw,380px);
-    background:rgba(10,15,22,.92);border:1px solid rgba(255,255,255,.06);
-    backdrop-filter:blur(6px);border-radius:10px;padding:10px 10px;
-    box-shadow:0 6px 22px rgba(0,0,0,.35);display:none;pointer-events:auto;z-index:9999
-  }
+  .btn{position:fixed;left:14px;top:14px;width:26px;height:20px;cursor:pointer;pointer-events:auto}
+  .btn span, .btn:before, .btn:after{content:"";display:block;height:2px;background:#e7ebf3;margin:6px 0;border-radius:2px;opacity:.9}
+  .panel{position:fixed;left:14px;top:50px;min-width:260px;max-width:min(92vw,380px);background:rgba(10,15,22,.92);border:1px solid rgba(255,255,255,.06);backdrop-filter:blur(6px);border-radius:10px;padding:10px 10px;box-shadow:0 6px 22px rgba(0,0,0,.35);display:none;pointer-events:auto;z-index:2}
   .row{display:flex;align-items:center;gap:8px;padding:6px 6px}
   .row + .row{border-top:1px solid rgba(255,255,255,.06)}
-  .lbl{color:#d7dde8;font:500 12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;letter-spacing:.2px;white-space:nowrap}
+  .lbl{color:#d7dde8;font:500 12px/1.3 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;letter-spacing:.2px;white-space:nowrap}
   select,input[type=range]{flex:1;background:#0f1726;border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#e7ebf3;padding:6px 8px;outline:none}
   input[type=range]{height:24px}
   .ghost{position:fixed;inset:0;z-index:1;display:none}
@@ -56,9 +41,14 @@
     <div class="row"><span class="lbl">Max Brightness</span><input id="bmax" type="range" min="0.2" max="6" step="0.01" value="3.2"></div>
     <div class="row"><span class="lbl">Min Brightness</span><input id="bmin" type="range" min="0" max="0.2" step="0.005" value="0"></div>
     <div class="row"><span class="lbl">Max Size</span><input id="rmax" type="range" min="0.03" max="0.35" step="0.001" value="0.12"></div>
-    <div class="row"><span class="lbl">Dispersion</span><input id="dispR" type="range" min="-10" max="10" step="1" value="0"></div>
-    <div class="row"><span class="lbl">Auto-Pulse</span>
-      <select id="autop"><option value="on" selected>On</option><option value="off">Off</option></select>
+    <div class="row"><span class="lbl">Dispersion</span>
+      <input id="dispR" type="range" min="-10" max="10" step="1" value="0">
+    </div>
+    <div class="row"><span class="lbl">Auto‑Pulse</span>
+      <select id="autop">
+        <option value="on" selected>On</option>
+        <option value="off">Off</option>
+      </select>
     </div>
     <div class="row" id="cblk">
       <div class="grid" style="width:100%">
@@ -74,6 +64,10 @@
 
 <script>
 'use strict';
+// ————————————————————————————————————————————————
+// ALL•SEEING•EYE's Breatheye
+// ————————————————————————————————————————————————
+
 // DPR clamp
 const DPR = Math.min(1.5, window.devicePixelRatio||1);
 const gl = document.getElementById('gl').getContext('webgl', {antialias:false, alpha:false, depth:false, stencil:false, preserveDrawingBuffer:false});
@@ -85,36 +79,52 @@ const frag = `
 precision highp float;
 uniform vec2 R;uniform float T;uniform vec4 P; // P: x=phase  y=Lmin  z=Lmax  w=rMax
 uniform float DI; // dispersion strength
+
 float n2(vec2 p){return fract(sin(dot(p,vec2(41.,289.)))*43758.5453);}
 float fbm(vec2 p){float s=0.,a=.5;for(int i=0;i<4;i++){s+=a*n2(p);p*=2.;a*=.5;}return s;}
 vec3 tonemap(vec3 c){c=max(c,0.);c=c/(1.+c);return c;}
+
 void main(){
-  vec2 uv=(gl_FragCoord.xy-0.5*R)/R.y;
-  float phase=P.x; float Lmin=P.y, Lmax=P.z; float Rb=P.w;
+  vec2 uv=(gl_FragCoord.xy-0.5*R)/R.y; // centered
+  float phase=P.x; float Lmin=P.y, Lmax=P.z; float Rb=P.w; // breathing inputs
   float Lb=mix(Lmin,Lmax,phase);
+
+  // backdrop: deep navy + subtle dust
   vec3 col=vec3(0.02,0.04,0.08);
   float neb=fbm(uv*2.0 + vec2(phase*3.1415, 0.));
   col += neb * 0.06 * tonemap(vec3(0.3,0.5,0.9)*Lb*0.3);
+
+  // soft luminous sphere — no hard edge (sun-like)
   float r = max(Rb, 1e-5);
   float d = length(uv)/(r+1e-6);
+  // brightness‑dependent softness
   float soft = mix(0.9, 2.2, clamp(Lb/3.0,0.0,1.0));
   float core = exp(-pow(d*soft, 2.0));
   float rim  = exp(-pow(d*soft*0.6, 2.0)) - exp(-pow(d*soft*1.4, 2.0));
   rim = max(rim, 0.0);
   vec3 glow = vec3(1.0,0.92,0.70)*(0.7*core + 0.45*rim);
+
+  // dispersion flares (dramatic mapping, sign flips sides)
   float sg = DI>=0.0?1.0:-1.0; float s = abs(DI);
   float k = mix(0.06, 0.50, clamp(s*1.0,0.0,1.0));
   vec2 off = uv * (k*sg*Lb);
   glow += vec3(1.,.35,.1)*exp(-pow(length(uv-off)*soft*1.1,2.0))*mix(0.25,0.65,s);
   glow += vec3(0.2,0.6,1.)*exp(-pow(length(uv+off)*soft*1.1,2.0))*mix(0.18,0.55,s);
+
   col = mix(col, glow*Lb, 0.85) + glow*(Lb*0.35);
+
+  // global halation
   col += exp(-pow(length(uv)*1.4,2.0))*Lb*0.12;
+
+  // whiteout / blackout guarantees
   col = tonemap(col);
   col = mix(col, vec3(1.0), smoothstep(1.8, 3.5, Lb));
   col *= step(0.0005, Lb);
+
   gl_FragColor=vec4(col,1.0);
 }
 `;
+
 function makeProg(gl, vsrc, fsrc){
   const vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, vsrc); gl.compileShader(vs);
   const fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, fsrc); gl.compileShader(fs);
@@ -143,9 +153,9 @@ let T_in=6, T_hi=2, T_out=6, T_lo=2;
 let phase=0.6; let tPhase=0; let seg='in';
 
 // User params
-let Lmin=0.0, Lmax=3.2;
-let rMax=0.12;
-let dispersion=0.006;
+let Lmin=0.0, Lmax=3.2; // brightness bounds
+let rMax=0.12; // relative radius (short side)
+let dispersion=0.006; // derived from slider
 let autoPulse=true;
 
 function setMode(name){
@@ -164,10 +174,11 @@ qs('bmax').oninput=e=>Lmax=parseFloat(e.target.value);
 qs('bmin').oninput=e=>Lmin=parseFloat(e.target.value);
 qs('rmax').oninput=e=>rMax=parseFloat(e.target.value);
 
-// dispersion slider
+// dispersion slider (−10..10) → dramatic mapping
 let dispLevel=0; function setDisp(v){ dispLevel=v; const base=0.006; const mag=Math.pow(2, Math.abs(v)/6); dispersion=(v>=0?1:-1)*base*mag; }
 setDisp(0);
 qs('dispR').oninput=e=>setDisp(parseFloat(e.target.value));
+
 qs('autop').onchange=e=>autoPulse=(e.target.value==='on');
 
 // custom sliders
@@ -188,7 +199,7 @@ btn.onclick=(e)=>{ open=!open; panel.style.display=open?'block':'none'; ghost.st
 ghost.onclick=()=>{ if(open) closeMenu(); };
 
 function step(dt){
-  if(!autoPulse) return;
+  if(!autoPulse) return; // paused if off
   const adv=(dur)=>{ tPhase+=dt; if(tPhase>=dur){ tPhase=0.; return true;} return false; };
   if(seg==='in'){ phase=tPhase/Math.max(0.001,T_in); if(adv(T_in)){seg=(T_hi>0)?'hi':'out';}}
   else if(seg==='hi'){ phase=1.; if(adv(T_hi)){seg='out';}}
@@ -202,18 +213,24 @@ function render(){
   gl.useProgram(prog);
   gl.uniform2f(uR, W*DPR, H*DPR);
   gl.uniform1f(uT, now*0.001);
-  const shortSide=Math.min(W,H)*DPR;
+  const shortSide=Math.min(W,H)*DPR; // invert support if user swaps min/max
   const lo=Math.min(Lmin,Lmax), hi=Math.max(Lmin,Lmax), inv=(Lmin>Lmax); const ph=inv?(1-phase):phase;
   gl.uniform4f(uP, ph, lo, hi, rMax*(shortSide/(Math.min(W*DPR,H*DPR))));
   gl.uniform1f(uDI, dispersion);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   requestAnimationFrame(render);
 }
-let _t=performance.now(); setMode('custom'); syncCustom(); requestAnimationFrame(render);
+let _t=performance.now(); setMode('custom'); syncCustom();
+requestAnimationFrame(render);
 
-// Fallback 2D
+// Fallback 2D (no WebGL)
 function fallback2D(){
   const c=document.getElementById('gl'); const x=c.getContext('2d'); const r=()=>{c.width=innerWidth; c.height=innerHeight; const w=c.width,h=c.height; x.fillStyle='#0b1220'; x.fillRect(0,0,w,h); const g=x.createRadialGradient(w/2,h/2,0,w/2,h/2,Math.min(w,h)*.4); g.addColorStop(0,'rgba(255,240,200,.9)'); g.addColorStop(1,'rgba(20,30,50,0)'); x.fillStyle=g; x.beginPath(); x.arc(w/2,h/2,Math.min(w,h)*.2,0,Math.PI*2); x.fill();}; addEventListener('resize',r); r();}
+
+/* 𓂀 breath by ALL•SEEING•EYE | light‑only, single‑file */
 </script>
 </body>
 </html>
+
+
+
