@@ -6,12 +6,13 @@
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>T0KENUMBERS</title>
 <style>
-  html, body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; overflow:hidden; }
+  html, body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
   #canvas {
     display:block; width:100vw; height:100vh; touch-action:none;
-    transform-origin: 0 0; /* zoom/pan referansı */
+    /* Zoom/Pan için dönüşüm kökenini sol-üst yapıyoruz */
+    transform-origin: 0 0;
   }
-  /* IME sahnede kalsın (off-screen yapma) → bazı tarayıcılar aksi halde klavye açmıyor */
+  /* IME sahnede dursun (off-screen yapma) → bazı tarayıcılar aksi halde klavye açmıyor */
   #ime {
     position:fixed; bottom:0; left:0;
     width:1px; height:1px; opacity:0;
@@ -24,19 +25,16 @@
   <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
 
 <script>
-  // ---- refs ----
+  // --- refs ---
   const canvas = document.getElementById('canvas');
   const IME    = document.getElementById('ime');
   window.IME   = IME; // C++ EM_ASM için
 
-  // Dokunmatik algılama
-  const isTouchCapable = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-
-  // Canvas framebuffer (DPR) boyutlama
+  // Canvas boyut (framebuffer)
   function fitCanvas(){
     const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
-    const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+    const w = Math.max(1, Math.floor(innerWidth  * dpr));
+    const h = Math.max(1, Math.floor(innerHeight * dpr));
     if (canvas.width!==w)  canvas.width  = w;
     if (canvas.height!==h) canvas.height = h;
   }
@@ -44,20 +42,22 @@
   addEventListener('resize', fitCanvas);
   addEventListener('orientationchange', fitCanvas);
 
-  // iOS güvenli stub’lar
+  // güvenli stub'lar
   if (!document.exitPointerLock) document.exitPointerLock = ()=>{};
   if (!HTMLCanvasElement.prototype.requestPointerLock)
     HTMLCanvasElement.prototype.requestPointerLock = ()=>{};
 
-  // Odak/IME davranışı (çalışan sürümle birebir)
   function focusCanvas(){ try{ canvas.focus({preventScroll:true}); }catch(_){} }
   canvas.addEventListener('mousedown',  focusCanvas);
   canvas.addEventListener('touchstart', focusCanvas, {passive:true});
 
+  // ❗ IME'den karakter YOLLAMAYACAĞIZ; sadece klavye açmak için odak veriyoruz.
+  // (çift yazma böyle biter; backspace/ok vs. GLFW üstünden çalışır)
+
   // runtime hazır olmadan cwrap/ccall YOK
   let wantText = null;
 
-  const VER = "2025-09-18-merge-final"; // cache-bust
+  const VER = "2025-09-18-zoom1"; // cache-bust
   window.Module = {
     canvas,
     locateFile: (p)=> p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
@@ -69,7 +69,7 @@
     printErr: (t)=>console.error(t),
   };
 
-  // Dokunurken ImGui text istiyorsa -> IME’yi odakla (klavye aç)
+  // Kullanıcı DOKUNURKEN ImGui text istiyorsa → IME'yi odakla (klavye aç)
   ['touchstart','mousedown'].forEach(ev =>
     canvas.addEventListener(ev, ()=>{
       if (wantText && wantText()===1) {
@@ -82,12 +82,11 @@
     }, {passive:true})
   );
 
-  // -------------------------------------------------
-  //  MOBİL: Pinch-Zoom + Pan (AYNEN SENİN SÜRÜMÜN)
-  //  MASAÜSTÜ: Gesture yok (ekran taşınmaz, scroll normal)
-  // -------------------------------------------------
-  let scale = 1;
-  let tx = 0, ty = 0;
+  // -------------------------
+  //  Pinch-Zoom & Pan (CSS transform)
+  // -------------------------
+  let scale = 1;                  // mevcut ölçek
+  let tx = 0, ty = 0;             // mevcut pan (px)
   const MIN_SCALE = 0.6;
   const MAX_SCALE = 3.0;
 
@@ -103,86 +102,108 @@
   };
   const midPt = (a,b)=> ({ x:(a.clientX+b.clientX)/2, y:(a.clientY+b.clientY)/2 });
 
-  if (isTouchCapable) {
-    // ---- sadece mobil gesture’lar ----
-    let touchMode = null; // 'pan' | 'pinch'
-    let panStart = {x:0, y:0, tx0:0, ty0:0};
-    let pinchStart = {d:0, scale0:1, center:{x:0,y:0}, tx0:0, ty0:0};
+  // Durum
+  let touchMode = null; // 'pan' | 'pinch'
+  let panStart = {x:0, y:0, tx0:0, ty0:0};
+  let pinchStart = {d:0, scale0:1, center:{x:0,y:0}, tx0:0, ty0:0};
 
-    canvas.addEventListener('touchstart', (e)=>{
-      if (e.touches.length === 1) {
-        // Tek parmak → pan
-        touchMode = 'pan';
-        const t = e.touches[0];
-        panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
-      } else if (e.touches.length >= 2) {
-        // İki parmak → pinch
-        touchMode = 'pinch';
-        const a = e.touches[0], b = e.touches[1];
-        pinchStart.d = dist2(a,b);
-        pinchStart.scale0 = scale;
-        pinchStart.center = midPt(a,b);
-        pinchStart.tx0 = tx; pinchStart.ty0 = ty;
-      }
-    }, {passive:false});
+  canvas.addEventListener('touchstart', (e)=>{
+    if (e.touches.length === 1) {
+      // Tek parmak → pan
+      touchMode = 'pan';
+      const t = e.touches[0];
+      panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
+    } else if (e.touches.length >= 2) {
+      // İki parmak → pinch
+      touchMode = 'pinch';
+      const a = e.touches[0], b = e.touches[1];
+      pinchStart.d = dist2(a,b);
+      pinchStart.scale0 = scale;
+      pinchStart.center = midPt(a,b);
+      pinchStart.tx0 = tx; pinchStart.ty0 = ty;
+    }
+  }, {passive:false});
 
-    canvas.addEventListener('touchmove', (e)=>{
-      if (touchMode === 'pan' && e.touches.length === 1) {
-        e.preventDefault();
-        const t = e.touches[0];
-        const dx = t.clientX - panStart.x;
-        const dy = t.clientY - panStart.y;
-        tx = panStart.tx0 + dx;
-        ty = panStart.ty0 + dy;
-        applyTransform();
-      } else if (touchMode === 'pinch' && e.touches.length >= 2) {
-        e.preventDefault();
-        const a = e.touches[0], b = e.touches[1];
-        const d = dist2(a,b);
-        if (pinchStart.d > 0) {
-          let newScale = pinchStart.scale0 * (d / pinchStart.d);
-          newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+  canvas.addEventListener('touchmove', (e)=>{
+    if (touchMode === 'pan' && e.touches.length === 1) {
+      e.preventDefault();
+      const t = e.touches[0];
+      const dx = t.clientX - panStart.x;
+      const dy = t.clientY - panStart.y;
+      // Pan, mevcut scale’e göre daha “yavaş” hissettirmesin diye direkt piksel bazında uygula
+      tx = panStart.tx0 + dx;
+      ty = panStart.ty0 + dy;
+      applyTransform();
+    } else if (touchMode === 'pinch' && e.touches.length >= 2) {
+      e.preventDefault();
+      const a = e.touches[0], b = e.touches[1];
+      const d = dist2(a,b);
+      if (pinchStart.d > 0) {
+        // Yeni ölçek
+        let newScale = pinchStart.scale0 * (d / pinchStart.d);
+        newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
 
-          // Pinch merkezine göre zoom
-          const cx = pinchStart.center.x;
-          const cy = pinchStart.center.y;
-          const k = newScale / pinchStart.scale0;
-          tx = cx - ( (cx - pinchStart.tx0) * k );
-          ty = cy - ( (cy - pinchStart.ty0) * k );
+        // Zoom’u “parmakların ortası” etrafında yap: (cx,cy)
+        const cx = pinchStart.center.x;
+        const cy = pinchStart.center.y;
 
-          scale = newScale;
-          applyTransform();
-        }
-      }
-    }, {passive:false});
+        // Eski ve yeni ölçekle aynı noktayı sabit tutacak pan düzeltmesi:
+        // (cx - tx) / scale  sabit kalsın ⇒ tx' = cx - ( (cx - tx0) * newScale/scale0 )
+        const k = newScale / pinchStart.scale0;
+        tx = cx - ( (cx - pinchStart.tx0) * k );
+        ty = cy - ( (cy - pinchStart.ty0) * k );
 
-    canvas.addEventListener('touchend', (e)=>{
-      if (e.touches.length === 0) {
-        touchMode = null;
-      } else if (e.touches.length === 1) {
-        // İki parmaktan bire düştüyse pan moduna geç
-        const t = e.touches[0];
-        touchMode = 'pan';
-        panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
-      }
-    }, {passive:false});
-
-    // Çift dokunuşta reset (mobilde sevdiğin davranış)
-    let lastTap = 0;
-    canvas.addEventListener('touchend', ()=>{
-      const now = performance.now();
-      if (now - lastTap < 300) { // double tap
-        scale = 1; tx = 0; ty = 0;
+        scale = newScale;
         applyTransform();
       }
-      lastTap = now;
-    }, {passive:true});
-  }
+    }
+  }, {passive:false});
 
-  // --- MASAÜSTÜ’DE gesture YOK ---
-  //  (mouse-drag pan ve ctrl+wheel zoom eklemiyoruz ki ekran hiç taşınmasın)
+  canvas.addEventListener('touchend', (e)=>{
+    if (e.touches.length === 0) {
+      touchMode = null;
+    } else if (e.touches.length === 1) {
+      // İki parmaktan bire düştüyse pan moduna geç
+      const t = e.touches[0];
+      touchMode = 'pan';
+      panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
+    }
+  }, {passive:false});
+
+  // Çift dokunuşta reset (opsiyonel ama faydalı)
+  let lastTap = 0;
+  canvas.addEventListener('touchend', ()=>{
+    const now = performance.now();
+    if (now - lastTap < 300) { // double tap
+      scale = 1; tx = 0; ty = 0;
+      applyTransform();
+    }
+    lastTap = now;
+  }, {passive:true});
+
+  // Mouse için de destek (isteğe bağlı basit versiyon)
+  let isDragging = false, mdx=0, mdy=0, tx0=0, ty0=0;
+  canvas.addEventListener('mousedown', (e)=>{ isDragging=true; mdx=e.clientX; mdy=e.clientY; tx0=tx; ty0=ty; });
+  addEventListener('mousemove', (e)=>{ if(!isDragging) return; const dx=e.clientX-mdx, dy=e.clientY-mdy; tx=tx0+dx; ty=ty0+dy; applyTransform(); });
+  addEventListener('mouseup', ()=>{ isDragging=false; });
+  canvas.addEventListener('wheel', (e)=>{
+    // ctrl/trackpad zoom desteği — tekerleği ölçeğe çevir (nazik)
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const cx = e.clientX, cy = e.clientY;
+      const scale0 = scale;
+      let newScale = scale * Math.pow(1.0015, -e.deltaY);
+      newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
+      const k = newScale / scale0;
+      tx = cx - ( (cx - tx) * k );
+      ty = cy - ( (cy - ty) * k );
+      scale = newScale;
+      applyTransform();
+    }
+  }, {passive:false});
+
 </script>
 
-<script src="./t0kenumbers.js?v=2025-09-18-merge-final"></script>
+<script src="./t0kenumbers.js?v=2025-09-18-zoom1"></script>
 </body>
 </html>
