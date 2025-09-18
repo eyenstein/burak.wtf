@@ -1,78 +1,53 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>t0kenumbers</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <style>
-    html,body{margin:0;height:100%;background:#111;overscroll-behavior:none}
-    #canvas{width:100%;height:100dvh;display:block;touch-action:none}
-    @supports (-webkit-touch-callout:none){ #canvas{height:-webkit-fill-available} }
-    .diag{position:fixed;left:0;right:0;z-index:99999;font:12px/1.4 monospace;white-space:pre-wrap}
-    .diag.top{top:0;background:#200;color:#f88;padding:8px}
-    .diag.bottom{bottom:0;background:#220;color:#ff8;padding:8px}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>T0KENUMBERS</title>
+<style>
+  html,body { margin:0; height:100%; background:#0b1220; overflow:hidden; }
+  /* Canvas'ı ekranda tam yay ama asıl boyutu JS belirleyecek */
+  #canvas { display:block; width:100vw; height:100vh; touch-action:none; }
+</style>
 </head>
 <body>
-  <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
-
-  <!-- Hata görünürlüğü -->
-  <script>
-    window.addEventListener("error", function(e){
-      const n=document.createElement("pre"); n.className="diag top";
-      n.textContent="Error: "+e.message+"\n"+(e.filename||"")+":"+(e.lineno||"")+":"+(e.colno||"");
-      document.body.appendChild(n);
-    });
-    window.addEventListener("unhandledrejection", function(e){
-      const n=document.createElement("pre"); n.className="diag bottom";
-      n.textContent="Unhandled promise rejection: "+(e.reason&&(e.reason.stack||e.reason.message||e.reason));
-      document.body.appendChild(n);
-    });
-  </script>
+  <canvas id="canvas" tabindex="0"></canvas>
 
   <script>
-    // ABSOLUTE BASE — GH Pages + custom domain + alt klasör için güvenli
-    const ABS_BASE = "/apps/t0kenumbers/";
+    // 1) Canvas'ı pencereye (DPR'lı) tam eşitle
+    const canvas = document.getElementById('canvas');
+    function fitCanvasToWindow() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
+      const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+      if (canvas.width  !== w) canvas.width  = w;
+      if (canvas.height !== h) canvas.height = h;
+    }
+    // İlk anda ayarla + resize'larda güncelle
+    fitCanvasToWindow();
+    window.addEventListener('resize', fitCanvasToWindow);
+    window.addEventListener('orientationchange', fitCanvasToWindow);
 
-    // Emscripten Module — kesin yol + debug hook'ları
+    // 2) Emscripten'e bu canvas'ı önceden ver
     window.Module = {
-      canvas: document.getElementById("canvas"),
-      locateFile: function (path) { return ABS_BASE + path; }, // index.wasm => /apps/t0kenumbers/index.wasm
-      print: (function(){
-        const n=document.createElement("pre"); n.className="diag top"; n.style.background="#024"; n.style.color="#adf"; document.body.appendChild(n);
-        return function(x){ n.textContent = (n.textContent + "\n" + x).slice(-4000); };
-      })(),
-      printErr: (function(){
-        const n=document.createElement("pre"); n.className="diag top"; n.style.background="#402"; n.style.color="#f8c"; document.body.appendChild(n);
-        return function(x){ n.textContent = (n.textContent + "\n" + x).slice(-4000); };
-      })(),
-      onAbort: function (reason) {
-        const n=document.createElement("pre"); n.className="diag bottom";
-        n.textContent="ABORT: "+reason;
-        document.body.appendChild(n);
-      }
+      canvas,
+      locateFile: (p)=>p,
+      onRuntimeInitialized() {
+        // odak al, klavye çalışsın
+        canvas.focus({preventScroll:true});
+      },
+      print: (t)=>console.log(t),
+      printErr: (t)=>console.error(t),
     };
-
-    // WASM preflight (HEAD) — 404/403/MIME hızlı teşhis
-    (async function(){
-      try {
-        const url = ABS_BASE + "index.wasm";
-        const r = await fetch(url, { method:"HEAD", cache:"no-store" });
-        if (!r.ok) {
-          const n=document.createElement("pre"); n.className="diag bottom";
-          n.textContent = "Preflight: " + url + " => " + r.status + " " + r.statusText + "\n" +
-                          "Eğer 404 ise dosya adı/konumu yanlış. 403 ise izin/CDN. 200 ise MIME çoğu zaman OK (GH Pages).";
-          document.body.appendChild(n);
-        }
-      } catch (e) {
-        const n=document.createElement("pre"); n.className="diag bottom";
-        n.textContent = "Preflight fetch failed: " + (e && (e.stack||e.message||e));
-        document.body.appendChild(n);
-      }
-    })();
+  </script>
+  <script>
+    // mouse wheel olayını canvas'a kilitle
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();   // sayfa scroll almasın
+    }, { passive: false });
   </script>
 
-  <!-- Emscripten çıkışı — cache buster ile eski JS'i bypass et -->
-  <script src="/apps/t0kenumbers/index.js?v=build-20250917-1" defer></script>
+  <!-- 3) Uygulama JS (WASM) -->
+  <script src="./t0kenumbers.js"></script>
 </body>
 </html>
