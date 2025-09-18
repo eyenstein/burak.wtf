@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>T0KENUMBERS</title>
+<style>
+  html,body { margin:0; height:100%; background:#0b1220; overflow:hidden; }
+  /* Canvas'ı ekranda tam yay ama asıl boyutu JS belirleyecek */
+  #canvas { display:block; width:100vw; height:100vh; touch-action:none; }
+</style>
+</head>
+<body>
+    html,body { overscroll-behavior: none; }
+
+  <canvas id="canvas" tabindex="0"></canvas>
+
+  <script>
+    // 1) Canvas'ı pencereye (DPR'lı) tam eşitle
+    const canvas = document.getElementById('canvas');
+    function fitCanvasToWindow() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
+      const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+      if (canvas.width  !== w) canvas.width  = w;
+      if (canvas.height !== h) canvas.height = h;
+    }
+    // İlk anda ayarla + resize'larda güncelle
+    fitCanvasToWindow();
+    window.addEventListener('resize', fitCanvasToWindow);
+    window.addEventListener('orientationchange', fitCanvasToWindow);
+
+    // 2) Emscripten'e bu canvas'ı önceden ver
+    window.Module = {
+      canvas,
+      locateFile: (p)=>p,
+      onRuntimeInitialized() {
+        // odak al, klavye çalışsın
+        canvas.focus({preventScroll:true});
+      },
+      print: (t)=>console.log(t),
+      printErr: (t)=>console.error(t),
+    };
+  </script>
+  <script>
+    // mouse wheel olayını canvas'a kilitle
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();   // sayfa scroll almasın
+    }, { passive: false });
+  </script>
+
+  <!-- 3) Uygulama JS (WASM) -->
+  <script src="./t0kenumbers.js"></script>
+</body>
+</html>

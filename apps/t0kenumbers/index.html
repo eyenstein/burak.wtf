@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>T0KENUMBERS</title>
 <style>
-  html,body { margin:0; height:100%; background:#0b1220; overflow:hidden; }
-  /* Canvas'ı ekranda tam yay ama asıl boyutu JS belirleyecek */
+  html,body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
   #canvas { display:block; width:100vw; height:100vh; touch-action:none; }
 </style>
 </head>
@@ -23,31 +22,58 @@
       if (canvas.width  !== w) canvas.width  = w;
       if (canvas.height !== h) canvas.height = h;
     }
-    // İlk anda ayarla + resize'larda güncelle
     fitCanvasToWindow();
-    window.addEventListener('resize', fitCanvasToWindow);
-    window.addEventListener('orientationchange', fitCanvasToWindow);
+    addEventListener('resize', fitCanvasToWindow);
+    addEventListener('orientationchange', fitCanvasToWindow);
 
-    // 2) Emscripten'e bu canvas'ı önceden ver
+    // 2) Canvas odak yönetimi: hover/click'te odakla
+    function focusCanvas() { canvas.focus({ preventScroll:true }); }
+    canvas.addEventListener('mouseenter', focusCanvas);
+    canvas.addEventListener('mousedown',  focusCanvas);
+    canvas.addEventListener('touchstart', focusCanvas, { passive:true });
+
+    // 3) Wheel'i canvas üzerindeyken sayfadan kes (ImGui/GLFW yine olayı alır)
+    document.addEventListener('wheel', (e) => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (el === canvas) e.preventDefault();
+    }, { passive:false });
+
+    // 4) Emscripten modülü
+    function showErr(msg) {
+      let div = document.getElementById('errlog');
+      if (!div) {
+        div = document.createElement('div');
+        div.id = 'errlog';
+        div.style.position = 'fixed';
+        div.style.bottom = '0';
+        div.style.left = '0';
+        div.style.right = '0';
+        div.style.maxHeight = '40%';
+        div.style.overflow = 'auto';
+        div.style.background = 'rgba(0,0,0,0.8)';
+        div.style.color = 'red';
+        div.style.font = '12px monospace';
+        div.style.zIndex = '9999';
+        document.body.appendChild(div);
+      }
+      div.innerText += msg + "\n";
+    }
     window.Module = {
       canvas,
       locateFile: (p)=>p,
-      onRuntimeInitialized() {
-        // odak al, klavye çalışsın
-        canvas.focus({preventScroll:true});
-      },
+      print: (t)=>showErr(t),
+      printErr: (t)=>showErr(t),
+    };
+
+    window.Module = {
+      canvas,
+      locateFile: (p)=>p,
+      onRuntimeInitialized() { focusCanvas(); },
       print: (t)=>console.log(t),
       printErr: (t)=>console.error(t),
     };
   </script>
-  <script>
-    // mouse wheel olayını canvas'a kilitle
-    canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();   // sayfa scroll almasın
-    }, { passive: false });
-  </script>
 
-  <!-- 3) Uygulama JS (WASM) -->
   <script src="./t0kenumbers.js"></script>
 </body>
 </html>
