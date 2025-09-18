@@ -21,14 +21,19 @@
 
 #include "t0kenumbers.hpp"
 #include "mints_global.hpp"
-
+#include <emscripten/emscripten.h>
+extern "C" {
+EMSCRIPTEN_KEEPALIVE int imgui_want_text() {
+    ImGuiIO& io = ImGui::GetIO();
+    return io.WantTextInput ? 1 : 0;
+}
 // ---- iOS IME köprüsü ----
 #if defined(__EMSCRIPTEN__)
 extern "C" {
-  EMSCRIPTEN_KEEPALIVE void ime_send(const char* utf8) {
+EMSCRIPTEN_KEEPALIVE void ime_send(const char* utf8) {
     if (utf8 && *utf8)
-      ImGui::GetIO().AddInputCharactersUTF8(utf8);
-  }
+        ImGui::GetIO().AddInputCharactersUTF8(utf8);
+}
 }
 #endif
 
@@ -44,7 +49,7 @@ struct TokenUI {
     bool   ui_init = false;
     double normal_supply = 0.0;
     bool   premine_on    = false;
-
+    
     TokenUI(const Token& t) : data(t) {}
     void ensure_init() {
         if (!ui_init) {
@@ -54,7 +59,7 @@ struct TokenUI {
         }
     }
 };
-
+}
 static void glfw_error_callback(int error, const char* desc) {
     std::fprintf(stderr, "GLFW Error %d: %s\n", error, desc);
 }
