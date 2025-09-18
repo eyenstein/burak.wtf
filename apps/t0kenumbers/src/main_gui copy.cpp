@@ -21,16 +21,35 @@
 
 #include "t0kenumbers.hpp"
 #include "mints_global.hpp"
+#include <emscripten/emscripten.h>
 
-// ---- iOS IME köprüsü ----
-#if defined(__EMSCRIPTEN__)
+#ifdef __EMSCRIPTEN__
 extern "C" {
-  EMSCRIPTEN_KEEPALIVE void ime_send(const char* utf8) {
-    if (utf8 && *utf8)
-      ImGui::GetIO().AddInputCharactersUTF8(utf8);
-  }
+
+// ImGui şu anda text istiyor mu?
+EMSCRIPTEN_KEEPALIVE int imgui_want_text() {
+    ImGuiIO& io = ImGui::GetIO();
+    return io.WantTextInput ? 1 : 0;
 }
+
+// IME'den gelen UTF-8 karakterleri ImGui'ye yolla
+EMSCRIPTEN_KEEPALIVE void ime_send(const char* utf8) {
+    if (utf8 && *utf8)
+        ImGui::GetIO().AddInputCharactersUTF8(utf8);
+}
+
+// (opsiyonel) Klavye tipini değiştir: 0=text, 1=numeric, 2=decimal
+EMSCRIPTEN_KEEPALIVE void ime_set_mode(int mode) {
+    emscripten_run_script(
+        mode==1 ? "if(window.IME){IME.setAttribute('inputmode','numeric');}"
+      : mode==2 ? "if(window.IME){IME.setAttribute('inputmode','decimal');}"
+                : "if(window.IME){IME.setAttribute('inputmode','text');}"
+    );
+}
+
+} // extern "C"
 #endif
+
 
 // ---- UI section visibility ----
 static bool g_show_tokens = true;
@@ -44,7 +63,7 @@ struct TokenUI {
     bool   ui_init = false;
     double normal_supply = 0.0;
     bool   premine_on    = false;
-
+    
     TokenUI(const Token& t) : data(t) {}
     void ensure_init() {
         if (!ui_init) {

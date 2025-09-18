@@ -7,18 +7,23 @@
 <style>
   html,body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
   #canvas { display:block; width:100vw; height:100vh; touch-action:none; }
+  /* IME sahnede ama görünmez: bazı mobil tarayıcılar off-screen input'ta klavye açmıyor */
+  #ime {
+    position:fixed; bottom:0; left:0;
+    width:1px; height:1px; opacity:0;
+    border:0; background:transparent; font-size:16px;
+  }
 </style>
 </head>
 <body>
   <canvas id="canvas" tabindex="0"></canvas>
-  <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off"
-         style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0.01;border:0;background:transparent;font-size:16px;" />
+  <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
 
   <script>
-    // --- Canvas/IME setup ---
+    // --- Canvas & IME ---
     const canvas = document.getElementById('canvas');
     const IME    = document.getElementById('ime');
-    window.IME   = IME;
+    window.IME   = IME; // C++ EM_ASM erişimi
 
     function fitCanvasToWindow() {
       const dpr = window.devicePixelRatio || 1;
@@ -31,9 +36,11 @@
     addEventListener('resize', fitCanvasToWindow);
     addEventListener('orientationchange', fitCanvasToWindow);
 
+    // Güvenli stub’lar
     if (typeof document.exitPointerLock !== "function") document.exitPointerLock = function(){};
     if (typeof HTMLCanvasElement.prototype.requestPointerLock !== "function") HTMLCanvasElement.prototype.requestPointerLock = function(){};
 
+    // Canvas odak
     function focusCanvas(){ try { canvas.focus({preventScroll:true}); } catch(e){} }
     canvas.addEventListener('mouseenter', focusCanvas);
     canvas.addEventListener('mousedown',  focusCanvas);
@@ -48,24 +55,148 @@
       }
     });
     IME.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') IME.blur(); });
+
+    // Kullanıcı dokunurken ImGui input istiyorsa klavyeyi AÇ (kritik kısım)
     ['touchstart','mousedown'].forEach(ev =>
-      document.addEventListener(ev, (e)=>{
-        if (document.activeElement === IME && e.target !== IME) IME.blur();
+      canvas.addEventListener(ev, () => {
+        try {
+          if (Module && Module.cwrap) {
+            const wantText = Module.cwrap('imgui_want_text','number',[]);
+            if (wantText() === 1) {
+              IME.focus({preventScroll:true});
+              const v = IME.value || "";
+              IME.setSelectionRange(v.length, v.length);
+            }
+          }
+        } catch(e){}
       }, {passive:true})
     );
 
-    // --- Tek Module tanımı + versiyon bust ---
-    const VER = "2025-09-18-6"; // her build'de değiştir
+    // Kullanışlı: ImGui yazı istemeyi bırakınca kapat (C++ EM_ASM’ı da var ama yedek dursun)
+    function tickBlurIfNotNeeded(){
+      try {
+        if (Module && Module.cwrap) {
+          const wantText = Module.cwrap('imgui_want_text','number',[]);
+          if (wantText() !== 1 && document.activeElement === IME) IME.blur();
+        }
+      } catch(e){}
+      requestAnimationFrame(tickBlurIfNotNeeded);
+    }
+    requestAnimationFrame(tickBlurIfNotNeeded);
+
+    // --- Tek Module + versiyon bust ---
+    const VER = "2025-09-18-7"; // build her yenilendiğinde değiştir
     window.Module = {
       canvas,
-      locateFile: (p) => p + (p.endsWith('.wasm') ? ('?v=' + VER) : ''), // WASM için bust
+      locateFile: (p) => p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
       onRuntimeInitialized(){ focusCanvas(); },
       print:    (t)=>console.log(t),
       printErr: (t)=>console.error(t),
     };
   </script>
 
-  <!-- Sadece TEK JS include -->
-  <script src="./t0kenumbers.js?v=2025-09-18-6"></script>
+  <!-- Tek JS include -->
+  <script src="./t0kenumbers.js?v=2025-09-18-7"></script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>T0KENUMBERS</title>
+<style>
+  html,body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
+  #canvas { display:block; width:100vw; height:100vh; touch-action:none; }
+  /* IME sahnede ama görünmez: bazı mobil tarayıcılar off-screen input'ta klavye açmıyor */
+  #ime {
+    position:fixed; bottom:0; left:0;
+    width:1px; height:1px; opacity:0;
+    border:0; background:transparent; font-size:16px;
+  }
+</style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="0"></canvas>
+  <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
+
+  <script>
+    // --- Canvas & IME ---
+    const canvas = document.getElementById('canvas');
+    const IME    = document.getElementById('ime');
+    window.IME   = IME; // C++ EM_ASM erişimi
+
+    function fitCanvasToWindow() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
+      const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+      if (canvas.width  !== w) canvas.width  = w;
+      if (canvas.height !== h) canvas.height = h;
+    }
+    fitCanvasToWindow();
+    addEventListener('resize', fitCanvasToWindow);
+    addEventListener('orientationchange', fitCanvasToWindow);
+
+    // Güvenli stub’lar
+    if (typeof document.exitPointerLock !== "function") document.exitPointerLock = function(){};
+    if (typeof HTMLCanvasElement.prototype.requestPointerLock !== "function") HTMLCanvasElement.prototype.requestPointerLock = function(){};
+
+    // Canvas odak
+    function focusCanvas(){ try { canvas.focus({preventScroll:true}); } catch(e){} }
+    canvas.addEventListener('mouseenter', focusCanvas);
+    canvas.addEventListener('mousedown',  focusCanvas);
+    canvas.addEventListener('touchstart', focusCanvas, { passive:true });
+
+    // IME -> C++
+    IME.addEventListener('input', () => {
+      const s = IME.value;
+      if (s && window.Module && Module.ccall) {
+        Module.ccall('ime_send', null, ['string'], [s]);
+        IME.value = '';
+      }
+    });
+    IME.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') IME.blur(); });
+
+    // Kullanıcı dokunurken ImGui input istiyorsa klavyeyi AÇ (kritik kısım)
+    ['touchstart','mousedown'].forEach(ev =>
+      canvas.addEventListener(ev, () => {
+        try {
+          if (Module && Module.cwrap) {
+            const wantText = Module.cwrap('imgui_want_text','number',[]);
+            if (wantText() === 1) {
+              IME.focus({preventScroll:true});
+              const v = IME.value || "";
+              IME.setSelectionRange(v.length, v.length);
+            }
+          }
+        } catch(e){}
+      }, {passive:true})
+    );
+
+    // Kullanışlı: ImGui yazı istemeyi bırakınca kapat (C++ EM_ASM’ı da var ama yedek dursun)
+    function tickBlurIfNotNeeded(){
+      try {
+        if (Module && Module.cwrap) {
+          const wantText = Module.cwrap('imgui_want_text','number',[]);
+          if (wantText() !== 1 && document.activeElement === IME) IME.blur();
+        }
+      } catch(e){}
+      requestAnimationFrame(tickBlurIfNotNeeded);
+    }
+    requestAnimationFrame(tickBlurIfNotNeeded);
+
+    // --- Tek Module + versiyon bust ---
+    const VER = "2025-09-18-7"; // build her yenilendiğinde değiştir
+    window.Module = {
+      canvas,
+      locateFile: (p) => p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
+      onRuntimeInitialized(){ focusCanvas(); },
+      print:    (t)=>console.log(t),
+      printErr: (t)=>console.error(t),
+    };
+  </script>
+
+  <!-- Tek JS include -->
+  <script src="./t0kenumbers.js?v=2025-09-18-7"></script>
 </body>
 </html>
