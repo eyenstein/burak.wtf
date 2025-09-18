@@ -22,6 +22,16 @@
 #include "t0kenumbers.hpp"
 #include "mints_global.hpp"
 
+// ---- iOS IME köprüsü ----
+#if defined(__EMSCRIPTEN__)
+extern "C" {
+  EMSCRIPTEN_KEEPALIVE void ime_send(const char* utf8) {
+    if (utf8 && *utf8)
+      ImGui::GetIO().AddInputCharactersUTF8(utf8);
+  }
+}
+#endif
+
 // ---- UI section visibility ----
 static bool g_show_tokens = true;
 static bool g_show_mints  = true;
@@ -108,26 +118,36 @@ int main() {
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        // ---- iOS IME aç/kapat (WantTextInput) ----
+        #if defined(__EMSCRIPTEN__)
+        {
+            static bool prev_want = false;
+            bool want = io.WantTextInput;
+            if (want && !prev_want) {
+                EM_ASM({ if (window.IME && document.activeElement !== window.IME) window.IME.focus(); });
+            }
+            if (!want && prev_want) {
+                EM_ASM({ if (window.IME && document.activeElement === window.IME) window.IME.blur(); });
+            }
+            prev_want = want;
+        }
+        #endif
+
         // ---- Viewport'a göre otomatik ölçek ----
-        // Tasarım temel boyutu (Xcode'daki defaultuna göre ayarla)
         const float BASE_W = 960.0f;
         const float BASE_H = 600.0f;
 
-        // Mevcut framebuffer boyutu
         int fb_w = 0, fb_h = 0;
         glfwGetFramebufferSize(window, &fb_w, &fb_h);
         if (fb_w <= 0) fb_w = 1;
         if (fb_h <= 0) fb_h = 1;
 
-        // Ekrana sığacak tek ölçek katsayısı (en küçük eksen esas)
         float scale = std::min(fb_w / BASE_W, fb_h / BASE_H);
-
-        // Aşırı uçları kırp (istersen farklı sınırlar ver)
         scale = std::clamp(scale, 0.6f, 2.5f);
 
-        // Sık sık minik dalgalanmalarla yeniden hesaplamasın
         if (std::abs(scale - last_scale) > 0.01f) {
-            ImGui::GetStyle() = base_style;      // orijinal stili geri yükle
+            ImGui::GetStyle() = base_style;
             ImGui::GetStyle().ScaleAllSizes(scale);
             ImGui::GetIO().FontGlobalScale = scale;
             last_scale = scale;
@@ -163,8 +183,8 @@ int main() {
             ImGui::End();
         }
 
-        // Tek ana pencere
-        ImGuiViewport* vp = ImGui::GetMainViewport(); 
+        // ---- Workspace: viewport'u tam kapla ----
+        ImGuiViewport* vp = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(vp->WorkPos);
         ImGui::SetNextWindowSize(vp->WorkSize);
 
@@ -174,8 +194,9 @@ int main() {
             ImGuiWindowFlags_NoCollapse |
             ImGuiWindowFlags_NoSavedSettings |
             ImGuiWindowFlags_NoBringToFrontOnFocus;
-        
+
         ImGui::Begin("Workspace", nullptr, ws_flags);
+
         const ImGuiTreeNodeFlags sectFlags =
             ImGuiTreeNodeFlags_DefaultOpen |
             ImGuiTreeNodeFlags_SpanAvailWidth;
