@@ -7,30 +7,19 @@
 <title>T0KENUMBERS</title>
 <style>
   html, body { margin:0; height:100%; background:#0b1220; overflow:hidden; }
-
-  /* Uygulama penceresi – sayfa sabit, gestures burada yönetiliyor */
   #viewport {
     position:fixed; inset:0;
     overflow:hidden;
-    /* Sadece dokunmatik cihazlarda gesture’ları biz yöneteceğiz; masaüstünde normal davranış */
     touch-action:none;
     user-select:none;
   }
-
-  /* Zoom/Pan uygulanacak katman (canvas bunun içinde) */
   #stage {
     position:absolute; top:0; left:0;
     width:100vw; height:100vh;
     transform-origin: 0 0;
     will-change: transform;
   }
-
-  /* Framebuffer */
-  #canvas {
-    display:block; width:100vw; height:100vh;
-  }
-
-  /* IME sahnede kalsın; klavyeye dokunmuyoruz */
+  #canvas { display:block; width:100vw; height:100vh; }
   #ime {
     position:fixed; bottom:0; left:0;
     width:1px; height:1px; opacity:0;
@@ -44,17 +33,17 @@
       <canvas id="canvas" tabindex="0"></canvas>
     </div>
   </div>
-  <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
+  <input id="ime" type="text" inputmode="text" autocomplete="off"
+         autocapitalize="off" autocorrect="off" />
 
 <script>
-  // ---- refs ----
   const viewport = document.getElementById('viewport');
   const stage    = document.getElementById('stage');
   const canvas   = document.getElementById('canvas');
   const IME      = document.getElementById('ime');
-  window.IME     = IME; // C++ EM_ASM için
+  window.IME     = IME;
 
-  // Canvas framebuffer boyutu
+  // --- framebuffer ---
   function fitCanvas(){
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.floor(innerWidth  * dpr));
@@ -66,20 +55,17 @@
   addEventListener('resize', fitCanvas);
   addEventListener('orientationchange', fitCanvas);
 
-  // Güvenli stub'lar
   if (!document.exitPointerLock) document.exitPointerLock = ()=>{};
   if (!HTMLCanvasElement.prototype.requestPointerLock)
     HTMLCanvasElement.prototype.requestPointerLock = ()=>{};
 
-  // Çalışan sürümdeki odak & IME davranışı aynen:
   function focusCanvas(){ try{ canvas.focus({preventScroll:true}); }catch(_){} }
   canvas.addEventListener('mousedown',  focusCanvas);
   canvas.addEventListener('touchstart', focusCanvas, {passive:true});
 
-  // ❗ IME sadece klavye açmak için; karakteri ImGui/GLFW alır.
+  // runtime hazır olmadan cwrap yok
   let wantText = null;
-
-  const VER = "2025-09-18-zoom-contained-final"; // cache-bust
+  const VER = "2025-09-18-zoom-pan"; // cache-bust
   window.Module = {
     canvas,
     locateFile: (p)=> p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
@@ -91,7 +77,7 @@
     printErr: (t)=>console.error(t),
   };
 
-  // Kullanıcı DOKUNURKEN ImGui text istiyorsa → IME'yi odakla (klavye aç)
+  // IME focus
   ['touchstart','mousedown'].forEach(ev =>
     canvas.addEventListener(ev, ()=>{
       if (wantText && wantText()===1) {
@@ -104,26 +90,20 @@
     }, {passive:true})
   );
 
-  // --------------- Pinch-Zoom & Pan (yalnızca dokunmatik) ---------------
-  const isTouchCapable = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-
-  let scale = 1;
-  let tx = 0, ty = 0;
-  const MIN_SCALE = 0.6;
-  const MAX_SCALE = 3.0;
+  // ---- Zoom & Pan ----
+  const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  let scale = 1, tx = 0, ty = 0;
+  const MIN_SCALE = 0.6, MAX_SCALE = 3.0;
 
   function vpSize(){ return { w: viewport.clientWidth, h: viewport.clientHeight }; }
 
   function clampPan(){
     const {w, h} = vpSize();
     const sw = w * scale, sh = h * scale;
-
     if (scale <= 1) {
-      // Zoom out: tamamı görünsün, ortala, pan kilit
       tx = (w - sw) * 0.5;
       ty = (h - sh) * 0.5;
     } else {
-      // Zoom in: sahneyi pencereden dışarı taşırma
       const minX = w - sw, maxX = 0;
       const minY = h - sh, maxY = 0;
       if (tx < minX) tx = minX;
@@ -139,114 +119,65 @@
   }
   applyTransform();
 
-  // Yardımcılar (pinch)
   const dist2 = (a,b)=> {
     const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
     return Math.sqrt(dx*dx + dy*dy);
   };
-  const midPt = (a,b)=> ({ x:(a.clientX+b.clientX)/2, y:(a.clientY+b.clientY)/2 });
 
-  if (isTouchCapable) {
-    let touchMode = null; // 'pan' | 'pinch'
-    let panStart = {x:0, y:0, tx0:0, ty0:0};
-    let pinchStart = {d:1, scale0:1, center:{x:0,y:0}, tx0:0, ty0:0};
+  if (isTouch) {
+    let mode = null;
+    let panStart = {x:0,y:0,tx0:0,ty0:0};
+    let pinchStart = {d:1, scale0:1, tx0:0, ty0:0, cx:0, cy:0};
 
-    viewport.addEventListener('touchstart', (e)=>{
-      if (e.touches.length === 1) {
-        // Tek parmak pan sadece zoom in’de
-        if (scale > 1) {
-          touchMode = 'pan';
-          const t = e.touches[0];
-          panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
-        } else {
-          touchMode = null;
+    viewport.addEventListener('touchstart', e=>{
+      if (e.touches.length===1) {
+        if (scale>1) {
+          mode = 'pan';
+          const t=e.touches[0];
+          panStart={x:t.clientX,y:t.clientY,tx0:tx,ty0:ty};
         }
-      } else if (e.touches.length >= 2) {
-        touchMode = 'pinch';
-        const a = e.touches[0], b = e.touches[1];
-        pinchStart.d = dist2(a,b) || 1;
-        pinchStart.scale0 = scale;
-        pinchStart.center = midPt(a,b);
-        pinchStart.tx0 = tx; pinchStart.ty0 = ty;
+      } else if (e.touches.length>=2) {
+        mode='pinch';
+        const a=e.touches[0], b=e.touches[1];
+        pinchStart.d = dist2(a,b)||1;
+        pinchStart.scale0=scale;
+        pinchStart.tx0=tx; pinchStart.ty0=ty;
+        pinchStart.cx=(a.clientX+b.clientX)/2;
+        pinchStart.cy=(a.clientY+b.clientY)/2;
       }
-    }, {passive:false});
+    },{passive:false});
 
-    viewport.addEventListener('touchmove', (e)=>{
-      if (touchMode === 'pan' && e.touches.length === 1) {
+    viewport.addEventListener('touchmove', e=>{
+      if (mode==='pan' && e.touches.length===1) {
         e.preventDefault();
-        const t = e.touches[0];
-        const dx = t.clientX - panStart.x;
-        const dy = t.clientY - panStart.y;
-        tx = panStart.tx0 + dx;
-        ty = panStart.ty0 + dy;
+        const t=e.touches[0];
+        tx = panStart.tx0 + (t.clientX-panStart.x);
+        ty = panStart.ty0 + (t.clientY-panStart.y);
         applyTransform();
-      } else if (touchMode === 'pinch' && e.touches.length >= 2) {
+      } else if (mode==='pinch' && e.touches.length>=2) {
         e.preventDefault();
-        const a = e.touches[0], b = e.touches[1];
-        const d = dist2(a,b);
-        if (pinchStart.d > 0) {
-          let newScale = pinchStart.scale0 * (d / pinchStart.d);
-          newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
-
-          const cx = pinchStart.center.x, cy = pinchStart.center.y;
-          const k = newScale / pinchStart.scale0;
-
-          tx = cx - ((cx - pinchStart.tx0) * k);
-          ty = cy - ((cy - pinchStart.ty0) * k);
-
-          scale = newScale;
-          applyTransform();
-        }
+        const a=e.touches[0], b=e.touches[1];
+        const d=dist2(a,b);
+        let newScale=pinchStart.scale0*(d/pinchStart.d);
+        newScale=Math.max(MIN_SCALE,Math.min(MAX_SCALE,newScale));
+        const k=newScale/pinchStart.scale0;
+        tx=pinchStart.cx-((pinchStart.cx-pinchStart.tx0)*k);
+        ty=pinchStart.cy-((pinchStart.cy-pinchStart.ty0)*k);
+        scale=newScale;
+        applyTransform();
       }
-    }, {passive:false});
+    },{passive:false});
 
-    viewport.addEventListener('touchend', (e)=>{
-      if (e.touches.length === 0) {
-        touchMode = null;
-      } else if (e.touches.length === 1) {
-        if (scale > 1) {
-          const t = e.touches[0];
-          touchMode = 'pan';
-          panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
-        } else {
-          touchMode = null;
-        }
-      }
-    }, {passive:false});
-
-    // Çift dokunuş reset (opsiyonel)
-    let lastTap = 0;
-    viewport.addEventListener('touchend', ()=>{
-      const now = performance.now();
-      if (now - lastTap < 300) { scale = 1; tx = 0; ty = 0; applyTransform(); }
-      lastTap = now;
-    }, {passive:true});
+    viewport.addEventListener('touchend', e=>{
+      if (e.touches.length===0) mode=null;
+      else if (e.touches.length===1 && scale>1) {
+        const t=e.touches[0];
+        mode='pan'; panStart={x:t.clientX,y:t.clientY,tx0:tx,ty0:ty};
+      } else mode=null;
+    },{passive:false});
   }
-
-  // Masaüstünde: scroll/wheel davranışını engellemiyoruz.
-  // Sadece trackpad pinch eşleniği olan ctrl+wheel ile nazik zoom (opsiyonel)
-  viewport.addEventListener('wheel', (e)=>{
-    if (!isTouchCapable && e.ctrlKey) {
-      e.preventDefault();
-      const cx = e.clientX, cy = e.clientY;
-      const s0 = scale;
-      let s1 = s0 * Math.pow(1.0015, -e.deltaY);
-      s1 = Math.max(MIN_SCALE, Math.min(MAX_SCALE, s1));
-      const k = s1 / s0;
-      tx = cx - ((cx - tx) * k);
-      ty = cy - ((cy - ty) * k);
-      scale = s1;
-      applyTransform();
-    }
-    // ctrl değilse engelleme → ImGui scrollbar & wheel normal çalışır
-  }, {passive:false});
-
-  // Pencere boyutu değişince sınırları tekrar uygula
-  addEventListener('resize', applyTransform);
-  addEventListener('orientationchange', applyTransform);
 </script>
 
-<!-- tek JS include — JS ve WASM aynı versiyon -->
-<script src="./t0kenumbers.js?v=2025-09-18-zoom-contained-final"></script>
+<script src="./t0kenumbers.js?v=2025-09-18-zoom-pan"></script>
 </body>
 </html>
