@@ -7,11 +7,27 @@
 <title>T0KENUMBERS</title>
 <style>
   html, body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
-  #canvas {
-    display:block; width:100vw; height:100vh; touch-action:none;
-    /* Zoom/Pan için dönüşüm kökenini sol-üst yapıyoruz */
-    transform-origin: 0 0;
+
+  /* Uygulama penceresi: sayfayı sabitler, kendi içinde zoom/pan yapar */
+  #viewport {
+    position:fixed; inset:0;          /* top:0; right:0; bottom:0; left:0 */
+    overflow:hidden;                  /* sayfa değil, sadece bu kutu görünür */
+    touch-action:none;                /* kendi gesturelarımızı kullanacağız */
   }
+
+  /* Zoom/Pan sahnesi: transform burada uygulanır (canvas’a değil) */
+  #stage {
+    position:absolute; top:0; left:0;
+    width:100vw; height:100vh;
+    transform-origin: 0 0;            /* sol-üst referans */
+    will-change: transform;
+  }
+
+  /* Canvas framebuffer: içeriği çiziyoruz; boyutu JS’te DPR ile set */
+  #canvas {
+    display:block; width:100vw; height:100vh;
+  }
+
   /* IME sahnede dursun (off-screen yapma) → bazı tarayıcılar aksi halde klavye açmıyor */
   #ime {
     position:fixed; bottom:0; left:0;
@@ -21,16 +37,22 @@
 </style>
 </head>
 <body>
-  <canvas id="canvas" tabindex="0"></canvas>
+  <div id="viewport">
+    <div id="stage">
+      <canvas id="canvas" tabindex="0"></canvas>
+    </div>
+  </div>
   <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
 
 <script>
-  // --- refs ---
-  const canvas = document.getElementById('canvas');
-  const IME    = document.getElementById('ime');
-  window.IME   = IME; // C++ EM_ASM için
+  // ---- refs ----
+  const viewport = document.getElementById('viewport');
+  const stage    = document.getElementById('stage');
+  const canvas   = document.getElementById('canvas');
+  const IME      = document.getElementById('ime');
+  window.IME     = IME; // C++ EM_ASM için
 
-  // Canvas boyut (framebuffer)
+  // Canvas framebuffer’ı ekran pikseline göre ayarla
   function fitCanvas(){
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.floor(innerWidth  * dpr));
@@ -42,22 +64,20 @@
   addEventListener('resize', fitCanvas);
   addEventListener('orientationchange', fitCanvas);
 
-  // güvenli stub'lar
+  // Güvenli stub'lar
   if (!document.exitPointerLock) document.exitPointerLock = ()=>{};
   if (!HTMLCanvasElement.prototype.requestPointerLock)
     HTMLCanvasElement.prototype.requestPointerLock = ()=>{};
 
+  // Çalışan sürümdeki odak/IME davranışı birebir korunuyor:
   function focusCanvas(){ try{ canvas.focus({preventScroll:true}); }catch(_){} }
   canvas.addEventListener('mousedown',  focusCanvas);
   canvas.addEventListener('touchstart', focusCanvas, {passive:true});
 
-  // ❗ IME'den karakter YOLLAMAYACAĞIZ; sadece klavye açmak için odak veriyoruz.
-  // (çift yazma böyle biter; backspace/ok vs. GLFW üstünden çalışır)
-
-  // runtime hazır olmadan cwrap/ccall YOK
+  // ❗ IME sadece klavye açmak için; karakteri IMGUI/GLFW alır (çift yazma yok)
   let wantText = null;
 
-  const VER = "2025-09-18-zoom1"; // cache-bust
+  const VER = "2025-09-18-zoom-pan-contained"; // cache-bust
   window.Module = {
     canvas,
     locateFile: (p)=> p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
@@ -83,15 +103,44 @@
   );
 
   // -------------------------
-  //  Pinch-Zoom & Pan (CSS transform)
+  //  Pinch-Zoom & Pan (sadece viewport içinde)
+  //  - Zoom out: sahne otomatik ortalanır, pan kilitlenir (scroll yok, tamamı görünür)
+  //  - Zoom in: pan serbest ama sınırlandırılmış (sahne dışına çıkmaz)
+  //  - Masaüstü: mouse ile pan/drag YOK, normal scroll/scrollbar davranışı bozulmaz
+  //  - Trackpad ctrl+wheel ile zoom (isteğe bağlı) ekli, normal wheel’i engellemiyoruz
   // -------------------------
-  let scale = 1;                  // mevcut ölçek
-  let tx = 0, ty = 0;             // mevcut pan (px)
+  let scale = 1;
+  let tx = 0, ty = 0;
   const MIN_SCALE = 0.6;
   const MAX_SCALE = 3.0;
 
+  function viewportSize(){
+    // viewport’un CSS boyutu (px)
+    return { w: viewport.clientWidth, h: viewport.clientHeight };
+  }
+
+  function clampPan(){
+    const {w, h} = viewportSize();
+    const sw = w * scale, sh = h * scale;
+
+    if (scale <= 1) {
+      // Zoom out: tamamını göster, ortala ve pan’ı kilitle
+      tx = (w - sw) * 0.5;
+      ty = (h - sh) * 0.5;
+    } else {
+      // Zoom in: sahneyi viewport içinde tut (boşluk bırakma)
+      const minX = w - sw, maxX = 0;
+      const minY = h - sh, maxY = 0;
+      if (tx < minX) tx = minX;
+      if (tx > maxX) tx = maxX;
+      if (ty < minY) ty = minY;
+      if (ty > maxY) ty = maxY;
+    }
+  }
+
   function applyTransform(){
-    canvas.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    clampPan();
+    stage.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
   }
   applyTransform();
 
@@ -107,30 +156,34 @@
   let panStart = {x:0, y:0, tx0:0, ty0:0};
   let pinchStart = {d:0, scale0:1, center:{x:0,y:0}, tx0:0, ty0:0};
 
-  canvas.addEventListener('touchstart', (e)=>{
+  // Sadece dokunma (mobil) için gesture’lar — mouse’u engellemiyoruz
+  viewport.addEventListener('touchstart', (e)=>{
     if (e.touches.length === 1) {
-      // Tek parmak → pan
-      touchMode = 'pan';
-      const t = e.touches[0];
-      panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
+      // Tek parmak pan sadece zoom in’de aktif
+      if (scale > 1) {
+        touchMode = 'pan';
+        const t = e.touches[0];
+        panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
+      } else {
+        touchMode = null; // scale<=1 iken pan yok
+      }
     } else if (e.touches.length >= 2) {
-      // İki parmak → pinch
+      // İki parmak pinch-zoom
       touchMode = 'pinch';
       const a = e.touches[0], b = e.touches[1];
-      pinchStart.d = dist2(a,b);
+      pinchStart.d = dist2(a,b) || 1;
       pinchStart.scale0 = scale;
       pinchStart.center = midPt(a,b);
       pinchStart.tx0 = tx; pinchStart.ty0 = ty;
     }
   }, {passive:false});
 
-  canvas.addEventListener('touchmove', (e)=>{
+  viewport.addEventListener('touchmove', (e)=>{
     if (touchMode === 'pan' && e.touches.length === 1) {
       e.preventDefault();
       const t = e.touches[0];
       const dx = t.clientX - panStart.x;
       const dy = t.clientY - panStart.y;
-      // Pan, mevcut scale’e göre daha “yavaş” hissettirmesin diye direkt piksel bazında uygula
       tx = panStart.tx0 + dx;
       ty = panStart.ty0 + dy;
       applyTransform();
@@ -139,17 +192,14 @@
       const a = e.touches[0], b = e.touches[1];
       const d = dist2(a,b);
       if (pinchStart.d > 0) {
-        // Yeni ölçek
         let newScale = pinchStart.scale0 * (d / pinchStart.d);
         newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
 
-        // Zoom’u “parmakların ortası” etrafında yap: (cx,cy)
-        const cx = pinchStart.center.x;
-        const cy = pinchStart.center.y;
-
-        // Eski ve yeni ölçekle aynı noktayı sabit tutacak pan düzeltmesi:
-        // (cx - tx) / scale  sabit kalsın ⇒ tx' = cx - ( (cx - tx0) * newScale/scale0 )
+        // Zoom’u pinch merkezine sabitle (cx, cy)
+        const cx = pinchStart.center.x, cy = pinchStart.center.y;
         const k = newScale / pinchStart.scale0;
+
+        // (cx - tx)/scale sabit kalsın → pan düzeltmesi:
         tx = cx - ( (cx - pinchStart.tx0) * k );
         ty = cy - ( (cy - pinchStart.ty0) * k );
 
@@ -159,20 +209,24 @@
     }
   }, {passive:false});
 
-  canvas.addEventListener('touchend', (e)=>{
+  viewport.addEventListener('touchend', (e)=>{
     if (e.touches.length === 0) {
       touchMode = null;
     } else if (e.touches.length === 1) {
-      // İki parmaktan bire düştüyse pan moduna geç
+      // İki parmaktan bire düştü → pan’e geç (sadece scale>1 ise)
       const t = e.touches[0];
-      touchMode = 'pan';
-      panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
+      if (scale > 1) {
+        touchMode = 'pan';
+        panStart = { x:t.clientX, y:t.clientY, tx0:tx, ty0:ty };
+      } else {
+        touchMode = null;
+      }
     }
   }, {passive:false});
 
-  // Çift dokunuşta reset (opsiyonel ama faydalı)
+  // Çift dokunuşta reset (opsiyonel)
   let lastTap = 0;
-  canvas.addEventListener('touchend', ()=>{
+  viewport.addEventListener('touchend', ()=>{
     const now = performance.now();
     if (now - lastTap < 300) { // double tap
       scale = 1; tx = 0; ty = 0;
@@ -181,29 +235,33 @@
     lastTap = now;
   }, {passive:true});
 
-  // Mouse için de destek (isteğe bağlı basit versiyon)
-  let isDragging = false, mdx=0, mdy=0, tx0=0, ty0=0;
-  canvas.addEventListener('mousedown', (e)=>{ isDragging=true; mdx=e.clientX; mdy=e.clientY; tx0=tx; ty0=ty; });
-  addEventListener('mousemove', (e)=>{ if(!isDragging) return; const dx=e.clientX-mdx, dy=e.clientY-mdy; tx=tx0+dx; ty=ty0+dy; applyTransform(); });
-  addEventListener('mouseup', ()=>{ isDragging=false; });
-  canvas.addEventListener('wheel', (e)=>{
-    // ctrl/trackpad zoom desteği — tekerleği ölçeğe çevir (nazik)
+  // Masaüstü: normal wheel/scrollbar davranışını bozma.
+  // Sadece ctrl+wheel ile nazik zoom (trackpad pinch eşleniği)
+  viewport.addEventListener('wheel', (e)=>{
     if (e.ctrlKey) {
       e.preventDefault();
+      const {w,h} = viewportSize();
       const cx = e.clientX, cy = e.clientY;
       const scale0 = scale;
       let newScale = scale * Math.pow(1.0015, -e.deltaY);
       newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
       const k = newScale / scale0;
+
+      // Fare konumu etrafında zoom
       tx = cx - ( (cx - tx) * k );
       ty = cy - ( (cy - ty) * k );
       scale = newScale;
       applyTransform();
     }
+    // ctrl değilse engelleme → ImGui scrollbar/wheel normal çalışır
   }, {passive:false});
 
+  // Pencere boyutu değişince transformu tekrar sınırla
+  addEventListener('resize', applyTransform);
+  addEventListener('orientationchange', applyTransform);
 </script>
 
-<script src="./t0kenumbers.js?v=2025-09-18-zoom1"></script>
+<!-- tek JS include — JS ve WASM aynı versiyon -->
+<script src="./t0kenumbers.js?v=2025-09-18-zoom-pan-contained"></script>
 </body>
 </html>
