@@ -22,20 +22,34 @@
 #include "t0kenumbers.hpp"
 #include "mints_global.hpp"
 #include <emscripten/emscripten.h>
+
+#ifdef __EMSCRIPTEN__
 extern "C" {
+
+// ImGui şu anda text istiyor mu?
 EMSCRIPTEN_KEEPALIVE int imgui_want_text() {
     ImGuiIO& io = ImGui::GetIO();
     return io.WantTextInput ? 1 : 0;
 }
-// ---- iOS IME köprüsü ----
-#if defined(__EMSCRIPTEN__)
-extern "C" {
+
+// IME'den gelen UTF-8 karakterleri ImGui'ye yolla
 EMSCRIPTEN_KEEPALIVE void ime_send(const char* utf8) {
     if (utf8 && *utf8)
         ImGui::GetIO().AddInputCharactersUTF8(utf8);
 }
+
+// (opsiyonel) Klavye tipini değiştir: 0=text, 1=numeric, 2=decimal
+EMSCRIPTEN_KEEPALIVE void ime_set_mode(int mode) {
+    emscripten_run_script(
+        mode==1 ? "if(window.IME){IME.setAttribute('inputmode','numeric');}"
+      : mode==2 ? "if(window.IME){IME.setAttribute('inputmode','decimal');}"
+                : "if(window.IME){IME.setAttribute('inputmode','text');}"
+    );
 }
+
+} // extern "C"
 #endif
+
 
 // ---- UI section visibility ----
 static bool g_show_tokens = true;
@@ -59,7 +73,7 @@ struct TokenUI {
         }
     }
 };
-}
+
 static void glfw_error_callback(int error, const char* desc) {
     std::fprintf(stderr, "GLFW Error %d: %s\n", error, desc);
 }
