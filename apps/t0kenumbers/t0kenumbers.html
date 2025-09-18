@@ -11,6 +11,7 @@
 </head>
 <body>
   <canvas id="canvas" tabindex="0"></canvas>
+
   <!-- iOS klavye için görünmez IME -->
   <input id="ime" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off"
          style="position:fixed;bottom:0;left:0;width:1px;height:1px;opacity:0;
@@ -32,10 +33,10 @@
 
     // Pointer lock mobilde yoksa stub'la (iOS crash engeli)
     if (typeof document.exitPointerLock !== "function") {
-      document.exitPointerLock = function(){ /* no-op */ };
+      document.exitPointerLock = function(){};
     }
     if (typeof HTMLCanvasElement.prototype.requestPointerLock !== "function") {
-      HTMLCanvasElement.prototype.requestPointerLock = function(){ /* no-op */ };
+      HTMLCanvasElement.prototype.requestPointerLock = function(){};
     }
 
     // IME köprüsü
@@ -55,27 +56,24 @@
         IME.value = '';
       }
     });
-    // Enter'da klavyeyi kapat
     IME.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') IME.blur(); });
-
-    // Boşluğa dokununca klavyeyi kapat
     ['touchstart','mousedown'].forEach(ev =>
       document.addEventListener(ev, (e)=>{
         if (document.activeElement === IME && e.target !== IME) IME.blur();
       }, {passive:true})
     );
 
-    // Emscripten Module — tek tanım
+    // Tek Module tanımı
     window.Module = {
       canvas,
-      locateFile: (p)=>p,
+      locateFile: (p)=>p, // wasm ve js aynı klasörde
       onRuntimeInitialized(){ focusCanvas(); },
       print: (t)=>console.log(t),
       printErr: (t)=>console.error(t),
     };
   </script>
 
-  <!-- WASM -->
-  <script src="./t0kenumbers.js"></script>
+  <!-- WASM/JS -->
+  <script src="./t0kenumbers.js?v=1"></script>
 </body>
 </html>
