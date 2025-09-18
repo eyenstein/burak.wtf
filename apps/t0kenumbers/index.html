@@ -7,19 +7,19 @@
 <title>T0KENUMBERS</title>
 <style>
   html, body { margin:0; height:100%; background:#0b1220; }
-  /* Canvas: her zaman görünür viewport’a göre boyutlanır ve hizalanır */
+  /* Canvas her zaman görünür viewport’a göre boyutlanır */
   #canvas {
     position:fixed; top:0; left:0;
-    width:100vw; height:100vh; display:block; touch-action:none;
-    /* JS, gerçek piksel boyutunu (canvas.width/height) ayrıca ayarlıyor */
+    width:100vw; height:100vh;
+    display:block; touch-action:none;
   }
-  /* IME: sahnede (off-screen DEĞİL), sadece klavye açmak için */
+  /* IME sahnede dursun (klavyeye biz karışmıyoruz) */
   #ime {
     position:fixed; left:0; bottom:0;
-    width:1px; height:1px; opacity:0; border:0; background:transparent; font-size:16px;
-    /* JS, viewport kaydığında IME’yi de translate eder ki “görünür” bölgede kalsın */
+    width:1px; height:1px; opacity:0;
+    border:0; background:transparent; font-size:16px;
   }
-  /* Mobil hata kutusu (sadece mobilde ekleniyor) */
+  /* Mobil hata kutusu */
   #mobileErrorBox {
     position:fixed; left:0; right:0; bottom:0;
     background:rgba(200,0,0,0.92); color:#fff;
@@ -30,128 +30,84 @@
 </head>
 <body>
   <canvas id="canvas" tabindex="0"></canvas>
-  <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
+  <input id="ime" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
 
 <script>
-  // ---------- Mobil hata kutusu (yalnızca küçük ekran) ----------
-  (function(){
-    const isMobile = matchMedia("(max-width: 768px)").matches;
-    if (!isMobile) return;
-    const box = document.createElement('div');
-    box.id = 'mobileErrorBox';
-    document.body.appendChild(box);
-    const write = (s)=>{ box.textContent += (s||"")+"\n"; box.scrollTop = box.scrollHeight; };
+/* ---- mobil hata kutusu (sadece küçük ekranda) ---- */
+(function(){
+  const isMobile = matchMedia("(max-width: 768px)").matches;
+  if (!isMobile) return;
+  const box = document.createElement('div');
+  box.id = 'mobileErrorBox';
+  document.body.appendChild(box);
+  const write = s => { box.textContent += (s||"")+"\n"; box.scrollTop = box.scrollHeight; };
+  const ignore = m => typeof m==='string' && m.includes('emscripten_set_main_loop_timing');
+  window.onerror = (m,src,l,c,e)=>{ if (!ignore(m)) write(`[JS ERROR] ${m}`); };
+  window.onunhandledrejection = e => { const r=e?.reason; if (!ignore(r)) write(`[PROMISE] ${r?.stack||r}`); };
+  const _err = console.error; console.error = (...a)=>{ if(!ignore(a[0])) write(a.join(' ')); _err(...a); };
+})();
 
-    const filter = (msg) => {
-      // Zararsız uyarıyı gösterme:
-      if (typeof msg === 'string' && msg.includes('emscripten_set_main_loop_timing')) return true;
-      return false;
-    };
+/* ---- refs ---- */
+const canvas = document.getElementById('canvas');
+const IME    = document.getElementById('ime'); // sadece sahnede dursun
+window.IME   = IME;
 
-    window.onerror = (m,src,l,c,e)=>{
-      if (filter(m)) return;
-      write(`[JS ERROR] ${m}\n${src||''}:${l||''}:${c||''}\n${e?.stack||''}`);
-    };
-    window.onunhandledrejection = (e)=>{
-      const r = e?.reason;
-      if (filter(r)) return;
-      write(`[PROMISE] ${r?.stack || r}`);
-    };
-    const _err = console.error;
-    console.error = (...a)=>{ if (!filter(a[0])) write(a.join(' ')); _err(...a); };
-  })();
+/* ---- iOS güvenli stub’lar ---- */
+if (!document.exitPointerLock) document.exitPointerLock = ()=>{};
+if (!HTMLCanvasElement.prototype.requestPointerLock)
+  HTMLCanvasElement.prototype.requestPointerLock = ()=>{};
 
-  // ---------- Refs ----------
-  const canvas = document.getElementById('canvas');
-  const IME    = document.getElementById('ime');
-  window.IME   = IME; // C++ EM_ASM için
+/* ---- görünür viewport’a uydur ---- */
+function applyViewport(){
+  const dpr = window.devicePixelRatio || 1;
+  const vv  = window.visualViewport;
 
-  // iOS güvenli stub’lar
-  if (!document.exitPointerLock) document.exitPointerLock = ()=>{};
-  if (!HTMLCanvasElement.prototype.requestPointerLock)
-    HTMLCanvasElement.prototype.requestPointerLock = ()=>{};
+  const cssW = Math.max(1, Math.floor(vv ? vv.width  : innerWidth));
+  const cssH = Math.max(1, Math.floor(vv ? vv.height : innerHeight));
+  const pxW  = Math.max(1, Math.floor(cssW * dpr));
+  const pxH  = Math.max(1, Math.floor(cssH * dpr));
 
-  // Görünür viewport’a (klavye dahil) göre canvas’ı boyutla ve hizala
-  function applyViewport(){
-    const dpr = window.devicePixelRatio || 1;
-    const vv = window.visualViewport;
+  if (canvas.width  !== pxW) canvas.width  = pxW;
+  if (canvas.height !== pxH) canvas.height = pxH;
 
-    const cssW = Math.max(1, Math.floor((vv ? vv.width  : innerWidth)));
-    const cssH = Math.max(1, Math.floor((vv ? vv.height : innerHeight)));
-    const pxW  = Math.max(1, Math.floor(cssW * dpr));
-    const pxH  = Math.max(1, Math.floor(cssH * dpr));
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
 
-    // Canvas gerçek piksel boyutu
-    if (canvas.width  !== pxW) canvas.width  = pxW;
-    if (canvas.height !== pxH) canvas.height = pxH;
+  // iOS zoom/klavye offset düzeltmesi
+  const offX = vv ? vv.offsetLeft : 0;
+  const offY = vv ? vv.offsetTop  : 0;
+  const t = `translate(${-offX}px, ${-offY}px)`;
+  canvas.style.transform = t;
+  IME.style.transform    = t;
+}
+applyViewport();
+addEventListener('resize', applyViewport);
+addEventListener('orientationchange', applyViewport);
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', applyViewport);
+  visualViewport.addEventListener('scroll',  applyViewport);
+}
 
-    // CSS boyutu
-    canvas.style.width  = cssW + 'px';
-    canvas.style.height = cssH + 'px';
+/* ---- canvas odak (mevcut davranışı koru) ---- */
+function focusCanvas(){ try{ canvas.focus({preventScroll:true}); }catch(e){} }
+canvas.addEventListener('mousedown',  focusCanvas);
+canvas.addEventListener('touchstart', focusCanvas, {passive:true});
 
-    // Zoom/klavye ile oluşan offset’leri telafi et (iOS Safari)
-    const offX = vv ? vv.offsetLeft : 0;
-    const offY = vv ? vv.offsetTop  : 0;
-    const t = `translate(${-offX}px, ${-offY}px)`;
-    canvas.style.transform = t;
-    IME.style.transform    = t; // IME görünür bölgede kalsın
-  }
-
-  // İlk kurulum
-  applyViewport();
-  addEventListener('resize', applyViewport);
-  addEventListener('orientationchange', applyViewport);
-  if (window.visualViewport) {
-    visualViewport.addEventListener('resize', applyViewport);
-    visualViewport.addEventListener('scroll',  applyViewport);
-  }
-
-  // Canvas odak
-  function focusCanvas(){ try{ canvas.focus({preventScroll:true}); }catch(e){} }
-  canvas.addEventListener('mousedown',  focusCanvas);
-  canvas.addEventListener('touchstart', focusCanvas, {passive:true});
-
-  // ---- IME sadece KLAVYE AÇMAK için; karakterleri GLFW/ImGui alır (çift yazma yok) ----
-  let wantText = null; // cwrap edilmiş imgui_want_text burada saklanacak
-
-  // İlk dokunuşta klavye: ImGui input’a tıklandıktan SONRA WantTextInput true olur.
-  // Bu yüzden dokunuşta 1–2 frame erteleyip kontrol ediyoruz → tek tıklamada açılır.
-  function openKeyboardFromTapIfNeeded(){
-    let tries = 0;
-    function tick(){
-      if (wantText && wantText() === 1) {
-        try{
-          IME.focus({preventScroll:true});
-          const v = IME.value || "";
-          IME.setSelectionRange(v.length, v.length);
-        }catch(e){}
-      } else if (tries++ < 2) {
-        requestAnimationFrame(tick); // ImGui bir sonraki frame’de WantTextInput’ı günceller
-      }
-    }
-    requestAnimationFrame(tick);
-  }
-
-  ['touchstart','mousedown'].forEach(ev =>
-    canvas.addEventListener(ev, openKeyboardFromTapIfNeeded, {passive:true})
-  );
-
-  // ---- Emscripten runtime ----
-  const VER = "2025-09-18-viewport-v2"; // cache-bust
-  window.Module = {
-    canvas,
-    locateFile: (p)=> p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
-    onRuntimeInitialized(){
-      try { wantText = Module.cwrap('imgui_want_text','number',[]); } catch(e) { console.error(e); }
-      focusCanvas();
-      applyViewport(); // güvence
-    },
-    print:    (t)=>console.log(t),
-    printErr: (t)=>console.error(t),
-  };
+/* ---- Emscripten Module ---- */
+const VER = "2025-09-18-viewport-v3"; // cache-bust
+window.Module = {
+  canvas,
+  locateFile: p => p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
+  onRuntimeInitialized(){
+    focusCanvas();
+    applyViewport(); // garanti
+  },
+  print:    t => console.log(t),
+  printErr: t => console.error(t),
+};
 </script>
 
-<!-- Tek JS include: JS ve WASM aynı VER ile -->
-<script src="./t0kenumbers.js?v=2025-09-18-viewport-v2"></script>
+<!-- tek JS include — JS ve WASM aynı versiyon -->
+<script src="./t0kenumbers.js?v=2025-09-18-viewport-v3"></script>
 </body>
 </html>
