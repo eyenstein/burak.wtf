@@ -6,12 +6,12 @@
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>T0KENUMBERS</title>
 <style>
-  html, body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
+  html, body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; overflow:hidden; }
   #canvas {
     display:block; width:100vw; height:100vh; touch-action:none;
-    transform-origin: 0 0; /* zoom/pan için referans */
+    transform-origin: 0 0; /* zoom/pan referansı */
   }
-  /* IME sahnede dursun (off-screen yapma) → bazı tarayıcılar aksi halde klavye açmıyor */
+  /* IME sahnede kalsın (off-screen yapma) → bazı tarayıcılar aksi halde klavye açmıyor */
   #ime {
     position:fixed; bottom:0; left:0;
     width:1px; height:1px; opacity:0;
@@ -24,7 +24,7 @@
   <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
 
 <script>
-  // --- refs ---
+  // ---- refs ----
   const canvas = document.getElementById('canvas');
   const IME    = document.getElementById('ime');
   window.IME   = IME; // C++ EM_ASM için
@@ -32,11 +32,11 @@
   // Dokunmatik algılama
   const isTouchCapable = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 
-  // Canvas boyut (framebuffer)
+  // Canvas framebuffer (DPR) boyutlama
   function fitCanvas(){
     const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(1, Math.floor(innerWidth  * dpr));
-    const h = Math.max(1, Math.floor(innerHeight * dpr));
+    const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
+    const h = Math.max(1, Math.floor(window.innerHeight * dpr));
     if (canvas.width!==w)  canvas.width  = w;
     if (canvas.height!==h) canvas.height = h;
   }
@@ -44,22 +44,20 @@
   addEventListener('resize', fitCanvas);
   addEventListener('orientationchange', fitCanvas);
 
-  // güvenli stub'lar
+  // iOS güvenli stub’lar
   if (!document.exitPointerLock) document.exitPointerLock = ()=>{};
   if (!HTMLCanvasElement.prototype.requestPointerLock)
     HTMLCanvasElement.prototype.requestPointerLock = ()=>{};
 
+  // Odak/IME davranışı (çalışan sürümle birebir)
   function focusCanvas(){ try{ canvas.focus({preventScroll:true}); }catch(_){} }
   canvas.addEventListener('mousedown',  focusCanvas);
   canvas.addEventListener('touchstart', focusCanvas, {passive:true});
 
-  // ❗ IME'den karakter YOLLAMAYACAĞIZ; sadece klavye açmak için odak veriyoruz.
-  // (çift yazma böyle biter; backspace/ok vs. GLFW üstünden çalışır)
-
   // runtime hazır olmadan cwrap/ccall YOK
   let wantText = null;
 
-  const VER = "2025-09-18-merge-mobile-desktop"; // cache-bust
+  const VER = "2025-09-18-merge-final"; // cache-bust
   window.Module = {
     canvas,
     locateFile: (p)=> p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
@@ -71,7 +69,7 @@
     printErr: (t)=>console.error(t),
   };
 
-  // Kullanıcı DOKUNURKEN ImGui text istiyorsa → IME'yi odakla (klavye aç)
+  // Dokunurken ImGui text istiyorsa -> IME’yi odakla (klavye aç)
   ['touchstart','mousedown'].forEach(ev =>
     canvas.addEventListener(ev, ()=>{
       if (wantText && wantText()===1) {
@@ -84,11 +82,12 @@
     }, {passive:true})
   );
 
-  // -------------------------
-  //  Pinch-Zoom & Pan (MOBİLDE AÇIK, MASAÜSTÜNDE KAPALI)
-  // -------------------------
-  let scale = 1;                  // mevcut ölçek
-  let tx = 0, ty = 0;             // mevcut pan (px)
+  // -------------------------------------------------
+  //  MOBİL: Pinch-Zoom + Pan (AYNEN SENİN SÜRÜMÜN)
+  //  MASAÜSTÜ: Gesture yok (ekran taşınmaz, scroll normal)
+  // -------------------------------------------------
+  let scale = 1;
+  let tx = 0, ty = 0;
   const MIN_SCALE = 0.6;
   const MAX_SCALE = 3.0;
 
@@ -97,15 +96,15 @@
   }
   applyTransform();
 
-  // Yardımcılar (pinch için)
+  // Yardımcılar
   const dist2 = (a,b)=> {
     const dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
     return Math.sqrt(dx*dx + dy*dy);
   };
   const midPt = (a,b)=> ({ x:(a.clientX+b.clientX)/2, y:(a.clientY+b.clientY)/2 });
 
-  // --- SADECE MOBİL GESTURE’LAR ---
   if (isTouchCapable) {
+    // ---- sadece mobil gesture’lar ----
     let touchMode = null; // 'pan' | 'pinch'
     let panStart = {x:0, y:0, tx0:0, ty0:0};
     let pinchStart = {d:0, scale0:1, center:{x:0,y:0}, tx0:0, ty0:0};
@@ -144,10 +143,9 @@
           let newScale = pinchStart.scale0 * (d / pinchStart.d);
           newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, newScale));
 
-          // Zoom’u pinch merkezine göre: (cx,cy)
+          // Pinch merkezine göre zoom
           const cx = pinchStart.center.x;
           const cy = pinchStart.center.y;
-
           const k = newScale / pinchStart.scale0;
           tx = cx - ( (cx - pinchStart.tx0) * k );
           ty = cy - ( (cy - pinchStart.ty0) * k );
@@ -169,7 +167,7 @@
       }
     }, {passive:false});
 
-    // Çift dokunuşta reset (mobilde sende iyiydi, aynen koruyorum)
+    // Çift dokunuşta reset (mobilde sevdiğin davranış)
     let lastTap = 0;
     canvas.addEventListener('touchend', ()=>{
       const now = performance.now();
@@ -181,13 +179,10 @@
     }, {passive:true});
   }
 
-  // --- MASAÜSTÜ: mouse-drag pan ve wheel-zoom KAPALI ---
-  // (Yani ekran/pencere asla taşınmaz; ImGui scrollbar/wheel normal çalışır)
-  // Eğer ileride masaüstünde ctrl+wheel zoom istersen, aşağıdaki gibi ekleyebiliriz:
-  // canvas.addEventListener('wheel', (e)=>{ if(e.ctrlKey){ ... } }, {passive:false});
-
+  // --- MASAÜSTÜ’DE gesture YOK ---
+  //  (mouse-drag pan ve ctrl+wheel zoom eklemiyoruz ki ekran hiç taşınmasın)
 </script>
 
-<script src="./t0kenumbers.js?v=2025-09-18-merge-mobile-desktop"></script>
+<script src="./t0kenumbers.js?v=2025-09-18-merge-final"></script>
 </body>
 </html>
