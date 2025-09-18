@@ -1,80 +1,158 @@
-<script>
-  const canvas = document.getElementById('canvas');
-  const IME    = document.getElementById('ime');
-  window.IME   = IME;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta
+  name="viewport"
+  content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+/>
+<title>T0KENUMBERS</title>
+<style>
+  html, body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
+  #canvas { display:block; width:100vw; height:100vh; touch-action:none; }
 
-  ['keydown','keypress','keyup'].forEach(type=>{
-    IME.addEventListener(type, (e)=>{
-      if (e.key !== 'Enter') { e.stopPropagation(); e.preventDefault(); e.cancelBubble = true; return false; }
-    }, true);
-  });
-
-  function fitCanvasToWindow() {
-    const dpr = window.devicePixelRatio || 1;
-    const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
-    const h = Math.max(1, Math.floor(window.innerHeight * dpr));
-    if (canvas.width  !== w) canvas.width  = w;
-    if (canvas.height !== h) canvas.height = h;
+  /* IME sahnede ama görünmez: bazı mobil tarayıcılar off-screen input'ta klavye açmıyor */
+  #ime {
+    position:fixed; bottom:0; left:0;
+    width:1px; height:1px; opacity:0;
+    border:0; background:transparent; font-size:16px;
   }
-  fitCanvasToWindow();
-  addEventListener('resize', fitCanvasToWindow);
-  addEventListener('orientationchange', fitCanvasToWindow);
 
-  if (typeof document.exitPointerLock !== "function") document.exitPointerLock = function(){};
-  if (typeof HTMLCanvasElement.prototype.requestPointerLock !== "function") HTMLCanvasElement.prototype.requestPointerLock = function(){};
+  /* Mobil hata kutusu (yalnızca mobilde eklenecek) */
+  #mobileErrorBox {
+    position:fixed; bottom:0; left:0; right:0;
+    background:rgba(200,0,0,0.92); color:#fff;
+    font:12px/1.4 monospace; padding:6px 8px; z-index:9999;
+    max-height:40vh; overflow:auto; white-space:pre-wrap;
+  }
+</style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="0"></canvas>
+  <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
 
-  function focusCanvas(){ try { canvas.focus({preventScroll:true}); } catch(e){} }
-  canvas.addEventListener('mouseenter', focusCanvas);
-  canvas.addEventListener('mousedown',  focusCanvas);
-  canvas.addEventListener('touchstart', focusCanvas, { passive:true });
+  <script>
+    // -------- Mobil hata kutusu (yalnızca küçük ekranlarda) --------
+    let mobileBox = null;
+    (function setupMobileErrorBox(){
+      const isMobile = window.matchMedia("(max-width: 768px)").matches;
+      if (!isMobile) return;
+      mobileBox = document.createElement('div');
+      mobileBox.id = 'mobileErrorBox';
+      document.body.appendChild(mobileBox);
 
-  // IME -> C++
-  IME.addEventListener('input', () => {
-    const s = IME.value;
-    if (s && window.Module && Module.ccall) {
-      Module.ccall('ime_send', null, ['string'], [s]);
-      IME.value = '';
-    }
-  });
-  IME.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') IME.blur(); });
+      function writeLine(s){
+        if (!mobileBox) return;
+        mobileBox.textContent += (s || '') + "\n";
+        mobileBox.scrollTop = mobileBox.scrollHeight;
+      }
 
-  // ---- RUNTIME HAZIR OLANA KADAR bekle ----
-  let wantText = null; // cwrap edilmiş fonksiyonu burada cache'leyeceğiz
+      window.onerror = function(msg, src, line, col, err){
+        writeLine(`[JS ERROR] ${msg}\n${src||''}:${line||''}:${col||''}\n${err && err.stack ? err.stack : ''}`);
+      };
+      window.onunhandledrejection = function(e){
+        const r = e && e.reason;
+        writeLine(`[PROMISE] ${r && r.stack ? r.stack : r}`);
+      };
 
-  const VER = "2025-09-18-9";
-  window.Module = {
-    canvas,
-    locateFile: (p) => p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
-    onRuntimeInitialized(){
-      // Artık Emscripten runtime hazır: güvenle cwrap edebiliriz
-      wantText = Module.cwrap('imgui_want_text','number',[]);
-      focusCanvas();
-      // tick loop'u şimdi başlat
-      requestAnimationFrame(tickBlurIfNotNeeded);
-    },
-    print: (t)=>console.log(t),
-    printErr: (t)=>console.error(t),
-  };
+      // Console fallback -> mobil kutuya da yaz
+      const origLog = console.log, origErr = console.error, origWarn = console.warn;
+      console.log = (...a)=>{ writeLine(a.join(' ')); origLog.apply(console,a); };
+      console.error = (...a)=>{ writeLine(a.join(' ')); origErr.apply(console,a); };
+      console.warn = (...a)=>{ writeLine(a.join(' ')); origWarn.apply(console,a); };
+    })();
 
-  // Dokunuş sırasında ImGui yazı istiyorsa klavyeyi AÇ
-  ['touchstart','mousedown'].forEach(ev =>
-    canvas.addEventListener(ev, () => {
-      try {
-        if (wantText && wantText() === 1) {   // <-- runtime hazır değilse çalışmaz
-          IME.focus({preventScroll:true});
-          const v = IME.value || "";
-          IME.setSelectionRange(v.length, v.length);
+    // -------- Canvas & IME --------
+    const canvas = document.getElementById('canvas');
+    const IME    = document.getElementById('ime');
+    window.IME   = IME; // C++ EM_ASM erişimi
+
+    // IME fokusluyken klavye eventlerini tüket → GLFW'ye gitmesin (çift karakter fix)
+    ['keydown','keypress','keyup'].forEach(type=>{
+      IME.addEventListener(type, (e)=>{
+        if (e.key !== 'Enter') {
+          e.stopPropagation(); e.preventDefault(); e.cancelBubble = true; return false;
         }
-      } catch(e){}
-    }, {passive:true})
-  );
+      }, true); // capture fazı
+    });
 
-  // ImGui artık yazı istemiyorsa kapat (yalnızca runtime hazırsa)
-  function tickBlurIfNotNeeded(){
-    try {
-      if (wantText && wantText() !== 1 && document.activeElement === IME) IME.blur();
-    } catch(e){}
-    requestAnimationFrame(tickBlurIfNotNeeded);
-  }
-</script>
-<script src="./t0kenumbers.js?v=2025-09-18-9"></script>
+    function fitCanvasToWindow() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
+      const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+      if (canvas.width  !== w) canvas.width  = w;
+      if (canvas.height !== h) canvas.height = h;
+    }
+    fitCanvasToWindow();
+    addEventListener('resize', fitCanvasToWindow);
+    addEventListener('orientationchange', fitCanvasToWindow);
+
+    // Güvenli stub’lar
+    if (typeof document.exitPointerLock !== "function") document.exitPointerLock = function(){};
+    if (typeof HTMLCanvasElement.prototype.requestPointerLock !== "function") HTMLCanvasElement.prototype.requestPointerLock = function(){};
+
+    // Canvas odak
+    function focusCanvas(){ try { canvas.focus({preventScroll:true}); } catch(e){} }
+    canvas.addEventListener('mouseenter', focusCanvas);
+    canvas.addEventListener('mousedown',  focusCanvas);
+    canvas.addEventListener('touchstart', focusCanvas, { passive:true });
+
+    // IME -> C++ (yazılanları ImGui'ye ilet)
+    IME.addEventListener('input', () => {
+      const s = IME.value;
+      if (s && window.Module && Module.ccall) {
+        Module.ccall('ime_send', null, ['string'], [s]);
+        IME.value = '';
+      }
+    });
+    IME.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') IME.blur(); });
+
+    // ---- RUNTIME HAZIR OLMADAN cwrap/ccall KULLANMA ----
+    let wantText = null; // cwrap edilmiş imgui_want_text burada cache'lenecek
+
+    // Versiyon (cache-bust) — JS ve WASM aynı versiyonu alır
+    const VER = "2025-09-18-10";
+
+    // Tek Module objesi
+    window.Module = {
+      canvas,
+      locateFile: (p) => p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
+      onRuntimeInitialized(){
+        // Runtime hazır → güvenle cwrap edebiliriz
+        try {
+          wantText = Module.cwrap('imgui_want_text','number',[]);
+        } catch(e) { console.error('cwrap failed', e); }
+        focusCanvas();
+        // Blur döngüsünü burada başlat ki runtime hazır olsun
+        requestAnimationFrame(tickBlurIfNotNeeded);
+      },
+      print:    (t)=>console.log(t),
+      printErr: (t)=>console.error(t),
+    };
+
+    // Kullanıcı DOKUNURKEN ImGui input istiyorsa klavyeyi AÇ (kritik)
+    ['touchstart','mousedown'].forEach(ev =>
+      canvas.addEventListener(ev, () => {
+        try {
+          if (wantText && wantText() === 1) {
+            IME.focus({preventScroll:true});
+            const v = IME.value || "";
+            IME.setSelectionRange(v.length, v.length);
+          }
+        } catch(e){ /* sessizce geç */ }
+      }, {passive:true})
+    );
+
+    // ImGui artık yazı istemiyorsa kapat (yalnızca runtime hazırsa)
+    function tickBlurIfNotNeeded(){
+      try {
+        if (wantText && wantText() !== 1 && document.activeElement === IME) IME.blur();
+      } catch(e){ /* sessizce geç */ }
+      requestAnimationFrame(tickBlurIfNotNeeded);
+    }
+  </script>
+
+  <!-- Tek JS include: aynı VER ile -->
+  <script src="./t0kenumbers.js?v=2025-09-18-10"></script>
+</body>
+</html>
