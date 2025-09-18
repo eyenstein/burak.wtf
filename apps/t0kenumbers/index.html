@@ -61,7 +61,19 @@
       printErr: (t)=>showErr(String(t)),
     };
   </script>
-
+  <script>
+    // iOS Safari'de pointer lock yok → stub
+    if (typeof document.exitPointerLock !== "function") {
+      document.exitPointerLock = function() {
+        console.log("exitPointerLock not supported on this platform");
+      };
+    }
+    if (typeof document.requestPointerLock !== "function") {
+      HTMLCanvasElement.prototype.requestPointerLock = function() {
+        console.log("requestPointerLock not supported on this platform");
+      };
+    }
+  </script>
   <!-- WASM -->
   <script src="./t0kenumbers.js"></script>
 </body>
