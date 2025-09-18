@@ -13,12 +13,12 @@
   <canvas id="canvas" tabindex="0"></canvas>
 
   <script>
-    // 1) Canvas'ı pencereye (DPR'lı) tam eşitle
+    // Canvas & boyut
     const canvas = document.getElementById('canvas');
     function fitCanvasToWindow() {
       const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
-      const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+      const w = Math.max(1, Math.floor(innerWidth  * dpr));
+      const h = Math.max(1, Math.floor(innerHeight * dpr));
       if (canvas.width  !== w) canvas.width  = w;
       if (canvas.height !== h) canvas.height = h;
     }
@@ -26,54 +26,43 @@
     addEventListener('resize', fitCanvasToWindow);
     addEventListener('orientationchange', fitCanvasToWindow);
 
-    // 2) Canvas odak yönetimi: hover/click'te odakla
-    function focusCanvas() { canvas.focus({ preventScroll:true }); }
+    // Odak
+    function focusCanvas(){ canvas.focus({preventScroll:true}); }
     canvas.addEventListener('mouseenter', focusCanvas);
     canvas.addEventListener('mousedown',  focusCanvas);
     canvas.addEventListener('touchstart', focusCanvas, { passive:true });
 
-    // 3) Wheel'i canvas üzerindeyken sayfadan kes (ImGui/GLFW yine olayı alır)
-    document.addEventListener('wheel', (e) => {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      if (el === canvas) e.preventDefault();
-    }, { passive:false });
-
-    // 4) Emscripten modülü
-    function showErr(msg) {
+    // Hata overlay
+    function showErr(msg){
       let div = document.getElementById('errlog');
-      if (!div) {
+      if(!div){
         div = document.createElement('div');
+        Object.assign(div.style, {
+          position:'fixed', left:'0', right:'0', bottom:'0',
+          maxHeight:'40%', overflow:'auto',
+          background:'rgba(0,0,0,.85)', color:'#f55',
+          font:'12px/1.4 monospace', padding:'6px 8px', zIndex:9999
+        });
         div.id = 'errlog';
-        div.style.position = 'fixed';
-        div.style.bottom = '0';
-        div.style.left = '0';
-        div.style.right = '0';
-        div.style.maxHeight = '40%';
-        div.style.overflow = 'auto';
-        div.style.background = 'rgba(0,0,0,0.8)';
-        div.style.color = 'red';
-        div.style.font = '12px monospace';
-        div.style.zIndex = '9999';
         document.body.appendChild(div);
       }
-      div.innerText += msg + "\n";
+      div.textContent += (msg + "\n");
     }
-    window.Module = {
-      canvas,
-      locateFile: (p)=>p,
-      print: (t)=>showErr(t),
-      printErr: (t)=>showErr(t),
-    };
+    // Global JS hataları da yakala (mobilde çok işe yarar)
+    addEventListener('error', e => showErr('JS error: ' + e.message));
+    addEventListener('unhandledrejection', e => showErr('Promise: ' + (e.reason && e.reason.message || e.reason)));
 
+    // Emscripten Module — TEK tanım!
     window.Module = {
       canvas,
       locateFile: (p)=>p,
-      onRuntimeInitialized() { focusCanvas(); },
-      print: (t)=>console.log(t),
-      printErr: (t)=>console.error(t),
+      onRuntimeInitialized(){ focusCanvas(); },
+      print:    (t)=>showErr(String(t)),
+      printErr: (t)=>showErr(String(t)),
     };
   </script>
 
+  <!-- WASM -->
   <script src="./t0kenumbers.js"></script>
 </body>
 </html>
