@@ -5,67 +5,83 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>T0KENUMBERS</title>
 <style>
-  html,body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
+  html, body { margin:0; height:100%; background:#0b1220; overscroll-behavior:none; }
   #canvas { display:block; width:100vw; height:100vh; touch-action:none; }
+  /* IME sahnede dursun (off-screen yapma) → bazı tarayıcılar aksi halde klavye açmıyor */
+  #ime {
+    position:fixed; bottom:0; left:0;
+    width:1px; height:1px; opacity:0;
+    border:0; background:transparent; font-size:16px;
+  }
 </style>
 </head>
 <body>
   <canvas id="canvas" tabindex="0"></canvas>
-  <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off"
-         style="position:fixed;left:-9999px;width:1px;height:1px;opacity:0.01;border:0;background:transparent;font-size:16px;" />
+  <input id="ime" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" />
 
   <script>
-    // --- Canvas/IME setup ---
+    // --- refs ---
     const canvas = document.getElementById('canvas');
     const IME    = document.getElementById('ime');
-    window.IME   = IME;
+    window.IME   = IME; // C++ EM_ASM için
 
-    function fitCanvasToWindow() {
+    // canvas boyut
+    function fitCanvas(){
       const dpr = window.devicePixelRatio || 1;
-      const w = Math.max(1, Math.floor(window.innerWidth  * dpr));
-      const h = Math.max(1, Math.floor(window.innerHeight * dpr));
-      if (canvas.width  !== w) canvas.width  = w;
-      if (canvas.height !== h) canvas.height = h;
+      const w = Math.max(1, Math.floor(innerWidth  * dpr));
+      const h = Math.max(1, Math.floor(innerHeight * dpr));
+      if (canvas.width!==w)  canvas.width  = w;
+      if (canvas.height!==h) canvas.height = h;
     }
-    fitCanvasToWindow();
-    addEventListener('resize', fitCanvasToWindow);
-    addEventListener('orientationchange', fitCanvasToWindow);
+    fitCanvas();
+    addEventListener('resize', fitCanvas);
+    addEventListener('orientationchange', fitCanvas);
 
-    if (typeof document.exitPointerLock !== "function") document.exitPointerLock = function(){};
-    if (typeof HTMLCanvasElement.prototype.requestPointerLock !== "function") HTMLCanvasElement.prototype.requestPointerLock = function(){};
+    // güvenli stub'lar
+    if (!document.exitPointerLock) document.exitPointerLock = ()=>{};
+    if (!HTMLCanvasElement.prototype.requestPointerLock)
+      HTMLCanvasElement.prototype.requestPointerLock = ()=>{};
 
-    function focusCanvas(){ try { canvas.focus({preventScroll:true}); } catch(e){} }
-    canvas.addEventListener('mouseenter', focusCanvas);
+    function focusCanvas(){ try{ canvas.focus({preventScroll:true}); }catch(_){} }
     canvas.addEventListener('mousedown',  focusCanvas);
-    canvas.addEventListener('touchstart', focusCanvas, { passive:true });
+    canvas.addEventListener('touchstart', focusCanvas, {passive:true});
 
-    // IME -> C++
-    IME.addEventListener('input', () => {
-      const s = IME.value;
-      if (s && window.Module && Module.ccall) {
-        Module.ccall('ime_send', null, ['string'], [s]);
-        IME.value = '';
-      }
-    });
-    IME.addEventListener('keydown', (e)=>{ if (e.key === 'Enter') IME.blur(); });
-    ['touchstart','mousedown'].forEach(ev =>
-      document.addEventListener(ev, (e)=>{
-        if (document.activeElement === IME && e.target !== IME) IME.blur();
-      }, {passive:true})
-    );
+    // ❗ IME'den karakter YOLLAMAYACAĞIZ; sadece klavye açmak için odak veriyoruz.
+    // (çift yazma böyle biter; backspace/ok vs. GLFW üstünden çalışır)
 
-    // --- Tek Module tanımı + versiyon bust ---
-    const VER = "2025-09-18-6"; // her build'de değiştir
+    // runtime hazır olmadan cwrap/ccall YOK
+    let wantText = null;
+
+    const VER = "2025-09-18-12"; // cache-bust
     window.Module = {
       canvas,
-      locateFile: (p) => p + (p.endsWith('.wasm') ? ('?v=' + VER) : ''), // WASM için bust
-      onRuntimeInitialized(){ focusCanvas(); },
+      locateFile: (p)=> p + (p.endsWith('.wasm') ? ('?v='+VER) : ''),
+      onRuntimeInitialized(){
+        // hazır olduğunda imgui_want_text'i cwrap et
+        try { wantText = Module.cwrap('imgui_want_text','number',[]); } catch(_) {}
+        focusCanvas();
+      },
       print:    (t)=>console.log(t),
       printErr: (t)=>console.error(t),
     };
+
+    // Kullanıcı DOKUNURKEN ImGui text istiyorsa → IME'yi odakla (klavye aç)
+    ['touchstart','mousedown'].forEach(ev =>
+      canvas.addEventListener(ev, ()=>{
+        if (wantText && wantText()===1) {
+          try {
+            IME.focus({preventScroll:true});
+            const v = IME.value||"";
+            IME.setSelectionRange(v.length, v.length);
+          } catch(_){}
+        }
+      }, {passive:true})
+    );
+
+    // (İsteğe bağlı) IME’yi gereksiz kaldığında kapatmak istersen, C++’taki EM_ASM blur zaten yeterli.
+    // Burada ekstra döngü yok → ilk girişte beyaz ekran riski de kalmaz.
   </script>
 
-  <!-- Sadece TEK JS include -->
-  <script src="./t0kenumbers.js?v=2025-09-18-6"></script>
+  <script src="./t0kenumbers.js?v=2025-09-18-12"></script>
 </body>
 </html>
