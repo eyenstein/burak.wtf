@@ -49,7 +49,8 @@
   </div>
 
 <script>
-    const API_BASE = "https://burak.wtf/api";
+    const ENABLE_AUTH = false; // flip to true when ch4t is live
+    const API_BASE = "https://ch4t.burak.wtf";
   const authArea = document.getElementById("authArea");
   
   function authHeader(){
@@ -87,7 +88,7 @@
       body: JSON.stringify({ nick:n, pass:p })
     });
     const data = await res.json().catch(()=> ({}));
-    if(!res.ok) throw new Error(data.error || "işlem başarısız");
+    if(!res.ok) throw new Error(data.error || "wdym");
 
     // ch4t ile aynı formatta sakla
     localStorage.setItem("burak_user", JSON.stringify({ nick: data.nick, token: data.token || "" }));
@@ -137,6 +138,7 @@
   }
 
   (async function init(){
+    if (!ENABLE_AUTH) { authArea.innerHTML = ""; return; }
     try{
       // İstemci tarafı localStorage varsa direkt welcome
       const raw = localStorage.getItem("burak_user");
