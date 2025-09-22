@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>ALL•SEEING•EYE</title>
+<style>
+  /* minimal UI */
+  html,body{margin:0;height:100%;background:#0b1220;overscroll-behavior:none}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none}
+  .hud{position:fixed;inset:0;pointer-events:none}
+
+  /* MENU BUTTON — bottom-right, notch/safe-area aware */
+  .btn{
+    position:fixed;
+    left:auto; right:14px;
+    top:auto;  bottom:calc(env(safe-area-inset-bottom) + 14px);
+    width:26px;height:20px;
+    cursor:pointer;pointer-events:auto;z-index:10000;
+  }
+  .btn span, .btn:before, .btn:after{
+    content:"";display:block;height:2px;background:#e7ebf3;margin:6px 0;border-radius:2px;opacity:.9
+  }
+
+  .panel{
+    position:fixed;left:14px;top:50px;min-width:260px;max-width:min(92vw,380px);
+    background:rgba(10,15,22,.92);border:1px solid rgba(255,255,255,.06);
+    backdrop-filter:blur(6px);border-radius:10px;padding:10px 10px;
+    box-shadow:0 6px 22px rgba(0,0,0,.35);display:none;pointer-events:auto;z-index:9999
+  }
+  .row{display:flex;align-items:center;gap:8px;padding:6px 6px}
+  .row + .row{border-top:1px solid rgba(255,255,255,.06)}
+  .lbl{color:#d7dde8;font:500 12px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;letter-spacing:.2px;white-space:nowrap}
+  select,input[type=range]{flex:1;background:#0f1726;border:1px solid rgba(255,255,255,.08);border-radius:8px;color:#e7ebf3;padding:6px 8px;outline:none}
+  input[type=range]{height:24px}
+  .ghost{position:fixed;inset:0;z-index:1;display:none}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center;width:100%}
+  .grid .lbl{justify-self:start}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div class="hud">
+  <div id="menuBtn" class="btn" aria-label="menu"><span></span></div>
+  <div id="panel" class="panel" role="dialog">
+    <div class="row"><span class="lbl">Breathing Mode</span>
+      <select id="mode">
+        <option value="fast">Fast (4/1/4/1)</option>
+        <option value="med">Meditative (8/4/8/4)</option>
+        <option value="box">Box Breathing (5/5/5/5)</option>
+        <option value="all">All Breathing (Fibonacci)</option>
+        <option value="void">Void Breathing (Reverse Fib)</option>
+        <option value="Eye am Breathing" selected>Custom</option>
+      </select>
+    </div>
+    <div class="row"><span class="lbl">Max Brightness</span><input id="bmax" type="range" min="0.2" max="6" step="0.01" value="3.2"></div>
+    <div class="row"><span class="lbl">Min Brightness</span><input id="bmin" type="range" min="0" max="0.2" step="0.005" value="0"></div>
+    <div class="row"><span class="lbl">Max Size</span><input id="rmax" type="range" min="0.03" max="0.35" step="0.001" value="0.12"></div>
+    <div class="row"><span class="lbl">Dispersion</span><input id="dispR" type="range" min="-10" max="10" step="1" value="0"></div>
+    <div class="row"><span class="lbl">Auto-Pulse</span>
+      <select id="autop"><option value="on" selected>On</option><option value="off">Off</option></select>
+    </div>
+    <div class="row" id="cblk">
+      <div class="grid" style="width:100%">
+        <span class="lbl">Inhale (s)</span><input id="tin" type="range" min="0.2" max="20" step="0.1" value="6">
+        <span class="lbl">Hold High (s)</span><input id="thi" type="range" min="0" max="20" step="0.1" value="2">
+        <span class="lbl">Exhale (s)</span><input id="tout" type="range" min="0.2" max="20" step="0.1" value="6">
+        <span class="lbl">Hold Low (s)</span><input id="tlo" type="range" min="0" max="20" step="0.1" value="2">
+      </div>
+    </div>
+  </div>
+  <div id="ghost" class="ghost"></div>
+</div>
+<script>
+(function makeInstallable(){
+  try{
+    // 1) Manifest (Blob)
+    const manifest = {
+      name: "ALL•SEEING•EYE — lightv1",
+      short_name: "lightv1",
+      start_url: ".",
+      display: "standalone",
+      background_color: "#0b1220",
+      theme_color: "#0b1220",
+      icons: [
+        // İstersen gerçek PNG data URI ekleyebiliriz; boş da çalışır.
+        { src: "data:image/png;base64,iVBORw0KGgo=", sizes: "192x192", type: "image/png" }
+      ]
+    };
+    const murl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], {type:"application/manifest+json"}));
+    const link = document.createElement("link");
+    link.rel = "manifest"; link.href = murl; document.head.appendChild(link);
+
+    // 2) Service Worker (offline cache, sadece localhost/https’te çalışır)
+    if ("serviceWorker" in navigator) {
+      const swCode =
+        "const NAME='lightv1-cache-v1';" +
+        "self.addEventListener('install',e=>{e.waitUntil(caches.open(NAME).then(c=>c.addAll(['./'])))});" +
+        "self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==NAME).map(k=>caches.delete(k))))) });" +
+        "self.addEventListener('fetch',e=>{const u=new URL(e.request.url); if(e.request.method!=='GET') return;" +
+        "e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{ const copy=res.clone(); caches.open(NAME).then(c=>{ if(u.origin===location.origin){ c.put(e.request, copy);} }); return res; }))) });";
+      const swUrl = URL.createObjectURL(new Blob([swCode], {type:"text/javascript"}));
+      navigator.serviceWorker.register(swUrl).catch(console.warn);
+    }
+  }catch(err){ console.warn('PWA setup failed:', err); }
+})();
+</script>
+
+<script>
+'use strict';
+// DPR clamp
+const DPR = Math.min(1.5, window.devicePixelRatio||1);
+const gl = document.getElementById('gl').getContext('webgl', {antialias:false, alpha:false, depth:false, stencil:false, preserveDrawingBuffer:false});
+if(!gl){ fallback2D(); }
+
+// Shaders
+const vert = `attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);} `;
+const frag = `
+precision highp float;
+uniform vec2 R;uniform float T;uniform vec4 P; // P: x=phase  y=Lmin  z=Lmax  w=rMax
+uniform float DI; // dispersion strength
+float n2(vec2 p){return fract(sin(dot(p,vec2(41.,289.)))*43758.5453);}
+float fbm(vec2 p){float s=0.,a=.5;for(int i=0;i<4;i++){s+=a*n2(p);p*=2.;a*=.5;}return s;}
+vec3 tonemap(vec3 c){c=max(c,0.);c=c/(1.+c);return c;}
+void main(){
+  vec2 uv=(gl_FragCoord.xy-0.5*R)/R.y;
+  float phase=P.x; float Lmin=P.y, Lmax=P.z; float Rb=P.w;
+  float Lb=mix(Lmin,Lmax,phase);
+  vec3 col=vec3(0.02,0.04,0.08);
+  float neb=fbm(uv*2.0 + vec2(phase*3.1415, 0.));
+  col += neb * 0.06 * tonemap(vec3(0.3,0.5,0.9)*Lb*0.3);
+  float r = max(Rb, 1e-5);
+  float d = length(uv)/(r+1e-6);
+  float soft = mix(0.9, 2.2, clamp(Lb/3.0,0.0,1.0));
+  float core = exp(-pow(d*soft, 2.0));
+  float rim  = exp(-pow(d*soft*0.6, 2.0)) - exp(-pow(d*soft*1.4, 2.0));
+  rim = max(rim, 0.0);
+  vec3 glow = vec3(1.0,0.92,0.70)*(0.7*core + 0.45*rim);
+  float sg = DI>=0.0?1.0:-1.0; float s = abs(DI);
+  float k = mix(0.06, 0.50, clamp(s*1.0,0.0,1.0));
+  vec2 off = uv * (k*sg*Lb);
+  glow += vec3(1.,.35,.1)*exp(-pow(length(uv-off)*soft*1.1,2.0))*mix(0.25,0.65,s);
+  glow += vec3(0.2,0.6,1.)*exp(-pow(length(uv+off)*soft*1.1,2.0))*mix(0.18,0.55,s);
+  col = mix(col, glow*Lb, 0.85) + glow*(Lb*0.35);
+  col += exp(-pow(length(uv)*1.4,2.0))*Lb*0.12;
+  col = tonemap(col);
+  col = mix(col, vec3(1.0), smoothstep(1.8, 3.5, Lb));
+  col *= step(0.0005, Lb);
+  gl_FragColor=vec4(col,1.0);
+}
+`;
+function makeProg(gl, vsrc, fsrc){
+  const vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, vsrc); gl.compileShader(vs);
+  const fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, fsrc); gl.compileShader(fs);
+  const p = gl.createProgram(); gl.attachShader(p,vs); gl.attachShader(p,fs); gl.linkProgram(p); return p;
+}
+const prog = makeProg(gl, vert, frag); gl.useProgram(prog);
+const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const locP = gl.getAttribLocation(prog,'p'); gl.enableVertexAttribArray(locP); gl.vertexAttribPointer(locP, 2, gl.FLOAT, false, 0, 0);
+const uR = gl.getUniformLocation(prog,'R');
+const uT = gl.getUniformLocation(prog,'T');
+const uP = gl.getUniformLocation(prog,'P');
+const uDI = gl.getUniformLocation(prog,'DI');
+
+// Size & DPR
+let W=0,H=0; function resize(){W=innerWidth;H=innerHeight; gl.canvas.width=W*DPR; gl.canvas.height=H*DPR; gl.viewport(0,0,W*DPR,H*DPR);} resize(); addEventListener('resize', resize);
+
+// Breathing engine — 4 phases (linear)
+const Modes={ fast:{in:4, hi:1, out:4, lo:1}, med:{in:8, hi:4, out:8, lo:4}, box:{in:5, hi:5, out:5, lo:5} };
+const F=[1,1,2,3,5,8,13,21,34,55,89,144,233,377,610,987,1597,2584];
+const ALL=[]; for(let i=0;i<17;i++){ALL.push([F[i],F[i+1]||F[i]]);} // (1,1)..(1597,2584)
+const VOID=ALL.map(([a,b])=>[b,a]);
+let fibIdx=0;
+
+let mode='custom';
+let T_in=6, T_hi=2, T_out=6, T_lo=2;
+let phase=0.6; let tPhase=0; let seg='in';
+
+// User params
+let Lmin=0.0, Lmax=3.2;
+let rMax=0.12;
+let dispersion=0.006;
+let autoPulse=true;
+
+function setMode(name){
+  mode=name;
+  if(name==='fast'||name==='med'||name==='box'){
+    const m=Modes[name]; T_in=m.in;T_hi=m.hi;T_out=m.out;T_lo=m.lo; seg='in'; tPhase=0; fibIdx=0; toggleCustom(false);
+  } else if(name==='all'||name==='void'){
+    fibIdx=0; seg='in'; tPhase=0; const p=(name==='all'?ALL:VOID)[fibIdx]; T_in=p[0]; T_out=p[1]; T_hi=0; T_lo=0; toggleCustom(false);
+  } else { toggleCustom(true); }
+}
+
+// UI
+const qs=id=>document.getElementById(id);
+qs('mode').onchange=e=>setMode(e.target.value);
+qs('bmax').oninput=e=>Lmax=parseFloat(e.target.value);
+qs('bmin').oninput=e=>Lmin=parseFloat(e.target.value);
+qs('rmax').oninput=e=>rMax=parseFloat(e.target.value);
+
+// dispersion slider
+let dispLevel=0; function setDisp(v){ dispLevel=v; const base=0.006; const mag=Math.pow(2, Math.abs(v)/6); dispersion=(v>=0?1:-1)*base*mag; }
+setDisp(0);
+qs('dispR').oninput=e=>setDisp(parseFloat(e.target.value));
+qs('autop').onchange=e=>autoPulse=(e.target.value==='on');
+
+// custom sliders
+const sIn=qs('tin'), sHi=qs('thi'), sOut=qs('tout'), sLo=qs('tlo');
+function syncCustom(){ sIn.value=T_in; sHi.value=T_hi; sOut.value=T_out; sLo.value=T_lo; }
+function toggleCustom(on){ qs('cblk').style.display=on?'block':'none'; }
+[sIn,sHi,sOut,sLo].forEach((el)=>el.oninput=()=>{
+  T_in=parseFloat(sIn.value); T_hi=parseFloat(sHi.value); T_out=parseFloat(sOut.value); T_lo=parseFloat(sLo.value);
+  mode='custom'; qs('mode').value='custom';
+});
+
+// Menu open/close
+const panel=qs('panel'), btn=document.getElementById('menuBtn'), ghost=document.getElementById('ghost'); let open=false;
+const closeMenu=()=>{panel.style.display='none'; ghost.style.display='none'; open=false;};
+['mousedown','mouseup','click','touchstart','touchend'].forEach(ev=>{ panel.addEventListener(ev, e=>e.stopPropagation(), {passive:false}); });
+panel.querySelectorAll('input, select').forEach(el=>{ ['touchstart','touchend','mousedown','mouseup','click'].forEach(ev=>{ el.addEventListener(ev, e=>e.stopPropagation(), {passive:false}); }); });
+btn.onclick=(e)=>{ open=!open; panel.style.display=open?'block':'none'; ghost.style.display=open?'block':'none'; e.stopPropagation(); };
+ghost.onclick=()=>{ if(open) closeMenu(); };
+
+function step(dt){
+  if(!autoPulse) return;
+  const adv=(dur)=>{ tPhase+=dt; if(tPhase>=dur){ tPhase=0.; return true;} return false; };
+  if(seg==='in'){ phase=tPhase/Math.max(0.001,T_in); if(adv(T_in)){seg=(T_hi>0)?'hi':'out';}}
+  else if(seg==='hi'){ phase=1.; if(adv(T_hi)){seg='out';}}
+  else if(seg==='out'){ phase=1.-tPhase/Math.max(0.001,T_out); if(adv(T_out)){seg=(T_lo>0)?'lo':'in'; if(mode==='all'||mode==='void'){ fibIdx=(fibIdx+1)%ALL.length; const p=(mode==='all'?ALL:VOID)[fibIdx]; T_in=p[0]; T_out=p[1]; T_hi=0; T_lo=0; syncCustom(); }} }
+  else if(seg==='lo'){ phase=0.; if(adv(T_lo)){seg='in';}}
+  phase=Math.max(0,Math.min(1,phase));
+}
+
+function render(){
+  const now=performance.now(); const dt=Math.min(0.05, (now-_t)/1000); _t=now; step(dt);
+  gl.useProgram(prog);
+  gl.uniform2f(uR, W*DPR, H*DPR);
+  gl.uniform1f(uT, now*0.001);
+  const shortSide=Math.min(W,H)*DPR;
+  const lo=Math.min(Lmin,Lmax), hi=Math.max(Lmin,Lmax), inv=(Lmin>Lmax); const ph=inv?(1-phase):phase;
+  gl.uniform4f(uP, ph, lo, hi, rMax*(shortSide/(Math.min(W*DPR,H*DPR))));
+  gl.uniform1f(uDI, dispersion);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+let _t=performance.now(); setMode('custom'); syncCustom(); requestAnimationFrame(render);
+
+// Fallback 2D
+function fallback2D(){
+  const c=document.getElementById('gl'); const x=c.getContext('2d'); const r=()=>{c.width=innerWidth; c.height=innerHeight; const w=c.width,h=c.height; x.fillStyle='#0b1220'; x.fillRect(0,0,w,h); const g=x.createRadialGradient(w/2,h/2,0,w/2,h/2,Math.min(w,h)*.4); g.addColorStop(0,'rgba(255,240,200,.9)'); g.addColorStop(1,'rgba(20,30,50,0)'); x.fillStyle=g; x.beginPath(); x.arc(w/2,h/2,Math.min(w,h)*.2,0,Math.PI*2); x.fill();}; addEventListener('resize',r); r();}
+</script>
+</body>
+</html>

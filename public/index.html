@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>burak.wtf</title>
+<style>
+  body{
+    margin:0; height:100vh;
+    display:flex; align-items:center; justify-content:center;
+    background:#0b0f1a; font:14px monospace; color:#eee;
+  }
+  .page{ display:flex; align-items:center; justify-content:center; gap:8vw; padding:24px; }
+  .window{ background:#101624; border:2px solid #1f2a3d; border-radius:6px; width:340px; box-shadow:0 0 20px rgba(0,0,0,.6) }
+  .titlebar{ background:#182235; padding:6px 10px; font-weight:bold; font-size:13px; border-bottom:1px solid #1f2a3d }
+  .content{ padding:14px; display:flex; flex-direction:column; gap:12px }
+  .btn{ display:block; padding:10px 12px; background:#131b2c; border:1px solid #24314a; border-radius:4px; text-align:center; color:#eee; text-decoration:none; transition:background .15s,border-color .15s }
+  .btn:hover{ background:#1a2540; border-color:#2f4466 }
+  .right{ min-width:280px; display:flex; flex-direction:column; align-items:center; gap:16px; }
+  .quote{ white-space:pre; text-align:center; line-height:1.4; opacity:.9; }
+  .reserve-panel{ width:280px; display:flex; flex-direction:column; gap:10px; margin-top:10px; }
+  .reserve-panel label{ display:block }
+  .reserve-panel label span{ display:block; font-size:12px; opacity:.65; margin:0 0 6px 2px; }
+  .reserve-panel input{ width:100%; padding:10px 12px; border-radius:8px; border:1px solid #2a3556; background:#0b1220; color:#e7ebf3; outline:none; }
+  .reserve-panel input:focus{ border-color:#3b82f6 }
+  .reserve-panel button{ width:100%; padding:10px 12px; border:0; border-radius:8px; background:#1f6feb; color:#fff; font-weight:600; cursor:pointer; }
+  .reserve-panel button:disabled{ opacity:.6; cursor:not-allowed }
+  .reserve-panel .msg{ min-height:18px; font-size:12px; margin:4px 0 0; opacity:.85 }
+</style>
+
+<body>
+  <div class="page">
+    <div class="window">
+      <div class="titlebar">burak.wtf</div>
+      <div class="content">
+        <a class="btn" href="apps/breatheye/index.html">BreaThEye</a>
+        <a class="btn" href="apps/t0kenumbers/index.html">t0kenumbers</a>
+        <a class="btn" href="https://ch4t.burak.wtf">ch4t</a>
+        <a class="btn" href="apps/fun/v0.1.2.html">contactography button</a>
+        <a class="btn" href="apps/lightv0(app)/index.html">chatgpt's breath</a>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="quote">   May the Force
+  be
+   with No 01</div>
+      <div id="authArea"></div>
+    </div>
+  </div>
+
+<script>
+    const API_BASE = "https://burak.wtf/api";
+  const authArea = document.getElementById("authArea");
+  
+  function authHeader(){
+      try{
+          const raw = localStorage.getItem("burak_user");
+          if(!raw) return {};
+          const saved = JSON.parse(raw);
+          if(saved?.token){
+            return { Authorization: `Bearer ${saved.token}` };
+          }
+        }catch{}
+        return {};
+      }
+  function renderWelcome(nick){
+      authArea.textContent = "";
+
+         const wrapper = document.createElement("div");
+         wrapper.style.marginTop = "10px";
+         wrapper.style.textAlign = "center";
+         wrapper.style.opacity = ".9";
+
+         wrapper.appendChild(document.createTextNode("welcome "));
+         const strong = document.createElement("strong");
+         strong.textContent = nick;
+         wrapper.appendChild(strong);
+         wrapper.appendChild(document.createTextNode(" ✓"));
+
+         authArea.appendChild(wrapper);
+  }
+
+  async function doReserve(n, p) {
+    const res = await fetch(API_BASE + "/api/account", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json", ...authHeader() },
+      body: JSON.stringify({ nick:n, pass:p })
+    });
+    const data = await res.json().catch(()=> ({}));
+    if(!res.ok) throw new Error(data.error || "işlem başarısız");
+
+    // ch4t ile aynı formatta sakla
+    localStorage.setItem("burak_user", JSON.stringify({ nick: data.nick, token: data.token || "" }));
+    renderWelcome(data.nick);
+  }
+
+  function renderForm(){
+    authArea.innerHTML = `
+      <form class="reserve-panel" onsubmit="return false;">
+        <label>
+          <span>nickname</span>
+          <input id="nick" type="text" maxlength="24" autocomplete="username" placeholder="your_nick">
+        </label>
+        <label>
+          <span>password</span>
+          <input id="pass" type="password" maxlength="64" autocomplete="new-password" placeholder="••••••••">
+        </label>
+        <button id="reserveBtn" type="button">reserve(d)</button>
+        <p id="reserveMsg" class="msg"></p>
+      </form>
+    `;
+
+    const btn  = document.getElementById('reserveBtn');
+    const nick = document.getElementById('nick');
+    const pass = document.getElementById('pass');
+    const msg  = document.getElementById('reserveMsg');
+
+    btn.onclick = async ()=>{
+      msg.textContent = "";
+      const n = nick.value.trim(), p = pass.value;
+      if(!n || !p){ msg.textContent = "need both"; return; }
+
+      btn.disabled = true;
+      try{
+        await doReserve(n, p);
+      }catch(e){
+        const map = {
+          nick_taken:"already reserved",
+          wrong_password:"wrong pw",
+          nick_and_pass_required:"need both",
+          db_not_configured:"sorry"
+        };
+        msg.textContent = map[e.message] || e.message || "bug";
+        btn.disabled = false;
+      }
+    };
+  }
+
+  (async function init(){
+    try{
+      // İstemci tarafı localStorage varsa direkt welcome
+      const raw = localStorage.getItem("burak_user");
+      if (raw) {
+        const u = JSON.parse(raw);
+        if (u?.nick) return renderWelcome(u.nick);
+      }
+      // Yoksa me endpoint (opsiyonel)
+      const r = await fetch(API_BASE + "/api/me", { headers: { ...authHeader() } });
+      if (r.ok) {
+        const d = await r.json();
+        if (d.ok && d.nick) return renderWelcome(d.nick);
+      }
+    }catch{}
+    renderForm();
+  })();
+
+</script>
+</body>
+</html>
+

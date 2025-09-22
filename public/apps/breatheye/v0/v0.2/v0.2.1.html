@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>burak.wtf — ouroboros</title>
+<meta name="viewport"
+  content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style>
+  html, body { margin:0; padding:0; height:100%; background:#fff; }
+  body {
+    display:flex; align-items:center; justify-content:center;
+    font-family: Helvetica, Arial, sans-serif;
+    min-height: -webkit-fill-available;
+  }
+  .stage {
+    position: fixed; inset: 0;
+    width: 100vw; height: 100dvh;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
+    background:#fff;
+  }
+  .note {
+    position: fixed; left:50%; bottom: calc(env(safe-area-inset-bottom) + 12px);
+    transform: translateX(-50%);
+    font-size: 14px; color:#000; text-align:center; user-select:none;
+    mix-blend-mode: multiply;
+  }
+  .mail-button {
+    position: fixed; right: 20px; bottom: 20px;
+    font-size: 32px; text-decoration:none; background:#000; color:#fff;
+    padding: 12px; border-radius: 50%;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    transition: transform .2s;
+  }
+  .mail-button:hover { transform: scale(1.1); }
+  canvas { display:block; }
+</style>
+</head>
+<body>
+  <div id="stage" class="stage"></div>
+  <div class="note">
+    drag: tilt • pinch/scroll: zoom • Space: auto-orbit • Z: reset zoom
+  </div>
+  <a href="mailto:burakaltiparmak@icloud.com" class="mail-button"></a>
+
+<script type="module">
+/* ===== Three.js sahnesi — minimal doğal ouroboros ===== */
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+const stage = document.getElementById('stage');
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+// Scene & Camera
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 100);
+scene.add(camera);
+let zoom = 1, MIN_ZOOM = 0.35, MAX_ZOOM = 4;
+const baseCamZ = 3.2; // uzaklık
+camera.position.set(0, 0, baseCamZ);
+
+// Işıklar — yumuşak, doğal
+const hemi = new THREE.HemisphereLight(0xffffff, 0xdddddd, 0.9);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffffff, 0.8);
+key.position.set(2.5, 3.5, 2.2);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xffffff, 0.45);
+rim.position.set(-3.0, 1.5, -2.5);
+scene.add(rim);
+
+// Procedural “pul” dokusu (canvas)
+function makeScaleTexture(size=1024){
+  const cnv = document.createElement('canvas');
+  cnv.width = cnv.height = size;
+  const ctx = cnv.getContext('2d');
+  ctx.fillStyle = '#eee';
+  ctx.fillRect(0,0,size,size);
+
+  // hafif longitudinal ton geçişi (doğal gölge)
+  const lg = ctx.createLinearGradient(0,0,size,0);
+  lg.addColorStop(0, '#f2f2f2');
+  lg.addColorStop(0.5, '#e6e6e6');
+  lg.addColorStop(1, '#f2f2f2');
+  ctx.fillStyle = lg;
+  ctx.fillRect(0,0,size,size);
+
+  // balık pulu / chevron
+  ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+  ctx.lineWidth = size*0.0022;
+  const rows = 80, cols = 160;
+  for (let r=0; r<=rows; r++){
+    const y = (r/rows) * size;
+    for (let c=0; c<=cols; c++){
+      const x = (c/cols) * size;
+      const w = size/cols, h = size/rows;
+      ctx.beginPath();
+      ctx.moveTo(x - w*0.48, y);
+      ctx.quadraticCurveTo(x, y - h*0.45, x + w*0.48, y);
+      ctx.quadraticCurveTo(x, y + h*0.45, x - w*0.48, y);
+      ctx.stroke();
+    }
+  }
+
+  // dış kenara minimal “ejderha sırtı” hissi (çok ince)
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  for (let i=0;i<80;i++){
+    const t = i/80;
+    const cx = t*size, cy = size*0.08;
+    const w = size*0.018, h = size*0.06;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - h*0.5);
+    ctx.lineTo(cx + w*0.8, cy + h*0.5);
+    ctx.lineTo(cx - w*0.8, cy + h*0.5);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(cnv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2.5, 1.0); // çevresel tekrar
+  return tex;
+}
+
+const scaleTex = makeScaleTexture();
+
+// Ouroboros geometri: hafif konik torus (yılan kalınlığı biraz incelip kalınlaşsın)
+class TaperedTorusGeometry extends THREE.BufferGeometry {
+  constructor(R=1.0, r=0.24, radialSeg=512, tubularSeg=256, taper=0.12){
+    super();
+    const verts = [];
+    const norms = [];
+    const uvs   = [];
+    for (let i=0;i<=radialSeg;i++){
+      const u = i/radialSeg * Math.PI*2;
+      const cosu = Math.cos(u), sinu = Math.sin(u);
+      // taper: baş-kuyruk birleşiminde hafif incelme
+      const t = (1 - Math.cos(u))/2;        // 0..1..0
+      const rLocal = r * (1 - taper*0.6 + taper*Math.sin(u*2)*0.5);
+
+      for (let j=0;j<=tubularSeg;j++){
+        const v = j/tubularSeg * Math.PI*2;
+        const cosv = Math.cos(v), sinv = Math.sin(v);
+
+        const cx = (R + rLocal * cosv) * cosu;
+        const cy = (R + rLocal * cosv) * sinu;
+        const cz =  rLocal * sinv;
+
+        verts.push(cx, cy, cz);
+
+        // normal
+        const nx = cosu * cosv;
+        const ny = sinu * cosv;
+        const nz = sinv;
+        norms.push(nx, ny, nz);
+
+        // UV — çevrede 0..1, tüpte 0..1
+        uvs.push(i/radialSeg, j/tubularSeg);
+      }
+    }
+    const indices = [];
+    for (let i=0;i<radialSeg;i++){
+      for (let j=0;j<tubularSeg;j++){
+        const a = (tubularSeg+1)*i + j;
+        const b = (tubularSeg+1)*(i+1) + j;
+        const c = a + 1;
+        const d = b + 1;
+        indices.push(a,b,c, c,b,d);
+      }
+    }
+    this.setIndex(indices);
+    this.setAttribute('position', new THREE.Float32BufferAttribute(verts,3));
+    this.setAttribute('normal',   new THREE.Float32BufferAttribute(norms,3));
+    this.setAttribute('uv',       new THREE.Float32BufferAttribute(uvs,2));
+    this.computeBoundingSphere();
+  }
+}
+
+const geo = new TaperedTorusGeometry(1.0, 0.24, 720, 240, 0.18);
+const mat = new THREE.MeshStandardMaterial({
+  map: scaleTex,
+  metalness: 0.08,
+  roughness: 0.65,
+  color: 0x222222,   // koyu doğal ton (pul dokusu SRGB)
+});
+
+const ouro = new THREE.Mesh(geo, mat);
+scene.add(ouro);
+
+// Kuyruk-ağız birleşimini “imgelemek” için çok ince oyuk—gölge çizgisi
+{
+  const ring = new THREE.RingGeometry(1.0-0.24*0.98, 1.0+0.24*0.98, 256);
+  const m = new THREE.MeshBasicMaterial({ color:0x000000, transparent:true, opacity:0.06, side:THREE.DoubleSide });
+  const seam = new THREE.Mesh(ring, m);
+  seam.rotation.x = Math.PI/2;
+  scene.add(seam);
+}
+
+/* ===== Etkileşim: senin kısayollarınla birebir ===== */
+let pitch = 0, yaw = 0;
+let autoOrbit = false;
+const ORBIT_YAW_SPEED = 0.25;
+const ORBIT_PITCH_SPEED = 0.10;
+const KEY_TILT_STEP = 0.07;
+
+let dragging=false, lastX=0, lastY=0;
+let velYaw=0, velPitch=0;
+let inertiaActive=false, inertiaProfile='average';
+const INERTIA_DECAY = { slow:1.6, average:2.8, fast:4.5 };
+const EPS = 1e-4;
+
+function setObjectTransform(){
+  ouro.rotation.set(pitch, yaw, 0);
+}
+
+setObjectTransform();
+
+addEventListener('keydown', e=>{
+  if (e.key==='ArrowUp')   { pitch -= KEY_TILT_STEP; setObjectTransform(); }
+  if (e.key==='ArrowDown') { pitch += KEY_TILT_STEP; setObjectTransform(); }
+  if (e.key==='ArrowLeft') { yaw   -= KEY_TILT_STEP; setObjectTransform(); }
+  if (e.key==='ArrowRight'){ yaw   += KEY_TILT_STEP; setObjectTransform(); }
+
+  if (e.code==='Space'){ autoOrbit=!autoOrbit; e.preventDefault(); }
+
+  if (e.key.toLowerCase()==='s') inertiaProfile='slow';
+  if (e.key.toLowerCase()==='a') inertiaProfile='average';
+  if (e.key.toLowerCase()==='f') inertiaProfile='fast';
+
+  if (e.key.toLowerCase()==='z'){ zoom=1; camera.position.z = baseCamZ; }
+});
+
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+// Zoom: wheel & pinch
+stage.addEventListener('wheel', ev=>{
+  const scale = Math.exp(-ev.deltaY * 0.001);
+  zoom = clamp(zoom * scale, MIN_ZOOM, MAX_ZOOM);
+  camera.position.z = baseCamZ / zoom;
+  ev.preventDefault();
+}, {passive:false});
+
+// Pointer drag + momentum
+let lastSamples=[];
+function nowMs(){ return performance.now(); }
+function pushSample(x,y,ts){
+  lastSamples.push({x,y,ts});
+  const cutoff = ts - 80;
+  while (lastSamples.length && lastSamples[0].ts < cutoff) lastSamples.shift();
+}
+
+function onPointerDown(ev){
+  try{ stage.setPointerCapture(ev.pointerId);}catch{}
+  activePointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+  if (activePointers.size < 2){
+    dragging=true; inertiaActive=false;
+    lastX=ev.clientX; lastY=ev.clientY; lastSamples=[];
+    pushSample(lastX,lastY,nowMs());
+  }
+  ev.preventDefault();
+}
+
+function onPointerMove(ev){
+  if (activePointers.has(ev.pointerId)){
+    activePointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+  }
+  if (pinching){ handlePinchUpdate(); ev.preventDefault(); return; }
+  if (!dragging) return;
+
+  const x=ev.clientX, y=ev.clientY;
+  const dx=x-lastX, dy=y-lastY;
+  const ts=nowMs();
+
+  const kx = 2*Math.PI / innerHeight;
+  const ky = 2*Math.PI / innerWidth;
+
+  const dPitch = -dy * kx * 0.25;
+  const dYaw   =  dx * ky * 0.25;
+
+  pitch += dPitch; yaw += dYaw; setObjectTransform();
+
+  const prevTs = lastSamples.at(-1)?.ts ?? ts;
+  const dt = Math.max((ts - prevTs)/1000, 1/240);
+  velPitch = dPitch/dt; velYaw = dYaw/dt;
+
+  lastX=x; lastY=y; pushSample(x,y,ts);
+  ev.preventDefault();
+}
+
+function onPointerUp(ev){
+  if (activePointers.has(ev.pointerId)) activePointers.delete(ev.pointerId);
+  if (pinching && activePointers.size<2){ pinching=false; baseZoom=zoom; }
+
+  if (!dragging) return;
+  dragging=false;
+
+  const first=lastSamples[0], last=lastSamples.at(-1);
+  if (first && last && last.ts>first.ts){
+    const dx=last.x-first.x, dy=last.y-first.y;
+    const dt=(last.ts-first.ts)/1000;
+
+    const kx=2*Math.PI/innerHeight, ky=2*Math.PI/innerWidth;
+    const dPitch=-dy*kx*0.25, dYaw=dx*ky*0.25;
+    velPitch=dPitch/dt; velYaw=dYaw/dt;
+  }
+  inertiaActive=true;
+  try{ stage.releasePointerCapture(ev.pointerId);}catch{}
+  ev.preventDefault();
+}
+
+stage.addEventListener('pointerdown', onPointerDown, {passive:false});
+stage.addEventListener('pointermove', onPointerMove, {passive:false});
+stage.addEventListener('pointerup',   onPointerUp,   {passive:false});
+stage.addEventListener('pointercancel', onPointerUp, {passive:false});
+
+// Tap kısayolları (hız kontrolü eski metinden korunabilir; burada görsel hız yok)
+
+// Pinch (iki parmak)
+const activePointers = new Map();
+let pinching=false, startDist=0, baseZoom=zoom;
+function distance(pA,pB){ const dx=pA.x-pB.x, dy=pA.y-pB.y; return Math.hypot(dx,dy); }
+function handlePinchUpdate(){
+  if (activePointers.size<2) return;
+  const pts=[...activePointers.values()];
+  const d=distance(pts[0],pts[1]);
+  if (!pinching){
+    pinching=true; startDist=d||1; baseZoom=zoom; dragging=false; inertiaActive=false; return;
+  }
+  const factor = d / (startDist||1);
+  zoom = clamp(baseZoom*factor, MIN_ZOOM, MAX_ZOOM);
+  camera.position.z = baseCamZ / zoom;
+}
+// Eski iOS gesture event’leri
+window.addEventListener('gesturestart', e=>{ baseZoom=zoom; e.preventDefault(); }, {passive:false});
+window.addEventListener('gesturechange', e=>{
+  zoom = clamp(baseZoom*e.scale, MIN_ZOOM, MAX_ZOOM);
+  camera.position.z = baseCamZ / zoom; e.preventDefault();
+},{passive:false});
+window.addEventListener('gestureend', e=>{ e.preventDefault(); }, {passive:false});
+
+/* ===== Döngü ===== */
+let lastTs = performance.now();
+function tick(ts){
+  const dt=(ts-lastTs)/1000; lastTs=ts;
+
+  if (autoOrbit){
+    yaw   += ORBIT_YAW_SPEED   * dt;
+    pitch += ORBIT_PITCH_SPEED * dt;
+    setObjectTransform();
+  }
+
+  if (inertiaActive && !dragging && !autoOrbit && !pinching){
+    pitch += velPitch*dt; yaw += velYaw*dt; setObjectTransform();
+    const lambda = INERTIA_DECAY[inertiaProfile] || INERTIA_DECAY.average;
+    const decay = Math.exp(-lambda*dt);
+    velPitch*=decay; velYaw*=decay;
+    if (Math.abs(velYaw)<EPS && Math.abs(velPitch)<EPS){ inertiaActive=false; velYaw=velPitch=0; }
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// Resize
+addEventListener('resize', ()=>{
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+// Başlangıç yönü — minimal hissiyat
+pitch = -0.05; yaw = 0.4; setObjectTransform();
+</script>
+</body>
+</html>

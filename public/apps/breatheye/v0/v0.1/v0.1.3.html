@@ -1,0 +1,215 @@
+
+"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>burak.wtf</title>
+<style>
+  html, body { height:100%; margin:0; background:#fff; }
+  body { display:flex; align-items:center; justify-content:center; font-family:Helvetica, Arial, sans-serif; }
+  .stage {
+    position: relative;
+    width: 100vw; height: 40vh;
+    perspective: 900px;
+    overflow: hidden;
+  }
+  /* Fade’i kapalı bırakıyoruz; açmak istersen .stage.fade class'ını ekleyip FADE_MULT>0 yap */
+  .ring { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
+  .ch {
+    position:absolute; top:0; left:0;
+    line-height:1; color:#000; white-space:pre;
+    transform-origin:50% 50%;
+    will-change: transform, opacity;
+  }
+
+.note {
+  position: fixed;
+  left: 50%;             /* ortala */
+  bottom: 12px;          /* en alta 12px yukarı */
+  transform: translateX(-50%); /* tam ortalamak için */
+  font-size: 14px;
+  color: #000;
+}
+
+
+</style>
+</head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<body>
+  <div id="stage" class="stage"><div id="ring" class="ring"></div></div>
+<div class="note"> reverse, speed up or slow down</div>
+
+<script>
+
+
+
+
+  // ====== AYARLAR ======
+  const TEXT = "     r a n d o m   p ic k   u p    l in e   " ; // SONDA boşluk akışı yumuşatır
+  const RADIUS_FACTOR = 0.55;  // yarıçap için ekran oranı
+  const BASE_FONT = 48;        // px (başlangıç; otomatik ölçek uygulanır)
+  let SPEED_PX = 60;         // piksel/sn (lineer kaydırma hızı)
+  const FILL = 0.96;           // yarım dairenin yüzde kaçı kullanılsın (0.96 = kenarlarda %2 pay)
+  const FADE_MULT = 0;         // 0 = kapalı, 3 = güçlü (istersen 3 yap)
+  // ======================
+
+  const stage = document.getElementById('stage');
+  const ring  = document.getElementById('ring');
+
+  function layout() {
+    // Temizle
+    ring.innerHTML = "";
+
+    const W = innerWidth, H = innerHeight;
+    const R = Math.min(W, H) * RADIUS_FACTOR;          // yarıçap (px)
+    const L = Math.PI * R * FILL;                      // kullanılacak yay uzunluğu (yarım çemberin bir kısmı)
+    const chars = [...TEXT];
+
+    // Ölçüm için gizli ölçer
+    const meas = document.createElement('span');
+    meas.style.position = 'absolute';
+    meas.style.visibility = 'hidden';
+    meas.style.whiteSpace = 'pre';
+    meas.style.fontFamily = 'Helvetica, Arial, sans-serif';
+    meas.style.fontSize = BASE_FONT + 'px';
+    document.body.appendChild(meas);
+
+    // Harf genişliklerini ölç
+    const widths = chars.map(c => {
+      meas.textContent = c;
+      return meas.offsetWidth || 0;
+    });
+    const sumWidth = widths.reduce((a,b)=>a+b,0);
+
+    // Toplamı L'ye sığdırmak için ölçek
+    const fontScale = (sumWidth === 0) ? 1 : (L / sumWidth);
+    const fontPx = BASE_FONT * fontScale;
+    document.body.removeChild(meas);
+
+    // Span'ları oluştur
+    const spans = chars.map(c => {
+      const s = document.createElement('span');
+      s.className = 'ch';
+      s.textContent = c;
+      s.style.fontSize = fontPx + 'px';
+      ring.appendChild(s);
+      return s;
+    });
+
+    // Ölçeklenmiş genişlikleri tekrar ölç
+    const meas2 = document.createElement('span');
+    meas2.style.position = 'absolute';
+    meas2.style.visibility = 'hidden';
+    meas2.style.whiteSpace = 'pre';
+    meas2.style.fontFamily = 'Helvetica, Arial, sans-serif';
+    meas2.style.fontSize = fontPx + 'px';
+    document.body.appendChild(meas2);
+    const w2 = chars.map(c => { meas2.textContent = c; return meas2.offsetWidth || 0; });
+    document.body.removeChild(meas2);
+
+    // Merkezden merkeze doğrusal konumlar (0..L)
+    const centers = [];
+    let acc = 0;
+    for (let i=0; i<chars.length; i++){
+      const prevW = (i === 0) ? 0 : w2[i-1];
+      acc += (prevW/2) + (w2[i]/2);
+      centers.push(acc);
+    }
+    const totalLen = centers[centers.length - 1] + w2[w2.length - 1]/2; // gerçek toplam uzunluk (L'ye ≈ eşit)
+
+    // Kaydırmayı lineer uzayda yapalım (piksel cinsinden), sonra açısal uzaya çeviririz
+    let phase = 0; // 0..L
+    let lastTs = performance.now();
+
+    function frame(ts){
+      const dt = (ts - lastTs) / 1000; lastTs = ts;
+      phase = (phase + SPEED_PX * dt) % totalLen;
+
+      for (let i=0; i<spans.length; i++){
+        // Bu harfin merkezinin lineer konumu (0..L) + faz
+        let s = (centers[i] + phase) % totalLen;
+
+        // -L/2..+L/2 aralığına kaydır (ekranın orta noktası 0)
+        s -= totalLen/2;
+
+        // Doğrusal s'yi açıya çevir: theta = s / R
+        const theta = (s / R); // yaklaşık -π*FILL/2 .. +π*FILL/2
+
+        // 3D konum ve açı
+        const x = R * Math.sin(theta);
+        const z = R * (1 - Math.cos(theta));
+
+        // Kenarlarda perspektif ve dönme
+        const rotYdeg = theta * (180/Math.PI);        // yana dönme (sol/sağ kenarda ~±90°)
+        const depthScale = 1 - (z / (2*R));           // ~0.5..1 ölçek
+
+        // Opsiyonel fade
+        let opacity = 1;
+        if (FADE_MULT > 0){
+          const edge = Math.min(1, Math.abs(theta) / (Math.PI/2));
+          opacity = 1 - Math.min(1, edge * 0.8 * FADE_MULT);
+        }
+
+        spans[i].style.opacity = opacity;
+        spans[i].style.transform = `
+          translate3d(${x}px, 0px, ${-z}px)
+          rotateY(${rotYdeg}deg)
+          scale(${depthScale})
+        `;
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  layout();
+  addEventListener('resize', () => { layout(); }); // ekran değişince yeniden yerleşim
+
+
+
+// --- Klavye kontrolleri ---
+addEventListener('keydown', e => {
+  if (e.key === '0') {
+    SPEED_PX = Math.max(10, SPEED_PX - 10); // hızı azalt
+  }
+  if (e.key === '1') {
+    SPEED_PX += 10; // hızı arttır
+  }
+  if (e.key.toLowerCase() === 'r') {
+    SPEED_PX *= -1; // yönü tersine çevir
+  }
+});
+
+
+// --- Tap/Click kontrolleri (mobil + mouse) ---
+let tapCount = 0;
+let tapTimer;
+
+function handleTap() {
+  tapCount++;
+  clearTimeout(tapTimer);
+
+  tapTimer = setTimeout(() => {
+    if (tapCount === 1) {
+      SPEED_PX = Math.max(10, SPEED_PX - 10); // 1 tap: yavaşlat
+    } else if (tapCount === 2) {
+      SPEED_PX *= -1; // 2 tap: yön değiştir
+    } else if (tapCount === 3) {
+      SPEED_PX += 10; // 3 tap: hız arttır
+    }
+    tapCount = 0;
+  }, 300); // 300ms içinde yapılan tıklamalar toplanır
+}
+
+// Mobilde dokunma
+addEventListener('touchend', handleTap);
+
+// Masaüstünde mouse
+addEventListener('click', handleTap);
+
+
+</script>
+</body>
+</html>" 
+

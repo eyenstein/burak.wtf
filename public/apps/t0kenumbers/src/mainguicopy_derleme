@@ -1,0 +1,9 @@
+em++ -O2 -std=c++17 \
+  src/main_gui.cpp src/mints_global.cpp \
+  ../../imgui/imgui.cpp ../../imgui/imgui_draw.cpp ../../imgui/imgui_tables.cpp ../../imgui/imgui_widgets.cpp ../../imgui/misc/cpp/imgui_stdlib.cpp \
+  ../../imgui/backends/imgui_impl_glfw.cpp ../../imgui/backends/imgui_impl_opengl3.cpp \
+  -I../../imgui -I../../imgui/backends -Isrc \
+  -s USE_GLFW=3 -s FULL_ES3=1 -s MIN_WEBGL_VERSION=2 -s MAX_WEBGL_VERSION=2 \
+  -s ALLOW_MEMORY_GROWTH=1 -s WASM=1 \
+  -DIMGUI_IMPL_OPENGL_ES3=1 \
+  -o t0kenumbers.js

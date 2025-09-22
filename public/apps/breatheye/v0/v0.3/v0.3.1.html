@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>burak.wtf — light ring</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<style>
+  :root{
+    --ui-bg: #fff; --ui-fg: #000;
+    --shadow: 0 6px 16px rgba(0,0,0,.18);
+    --border: 1px solid rgba(0,0,0,.15);
+  }
+  html, body { margin:0; padding:0; height:100%; background:#fff; }
+  body {
+    display:flex; align-items:center; justify-content:center;
+    font-family: Helvetica, Arial, sans-serif;
+    min-height: -webkit-fill-available;
+    background:#fff;
+  }
+  .stage { position: fixed; inset: 0; width: 100vw; height: 100dvh; overflow: hidden; touch-action: none; overscroll-behavior: none; background:#fff; }
+
+  /* ——— Menu button (immobile) ——— */
+  .menu-button{ position:fixed; right:20px; top:20px; width:34px; height:34px; display:grid; place-items:center; background:var(--ui-bg); color:var(--ui-fg); border-radius:50%; box-shadow:var(--shadow); border:var(--border); cursor:pointer; user-select:none; }
+  .menu-button:hover{ transform: scale(1.06); }
+
+  /* ——— Top menu panel ——— */
+  .menu-panel{ position:fixed; left:0; right:0; top:0; transform: translateY(-105%); transition: transform .22s ease; pointer-events:none; }
+  .menu-panel.open{ transform: translateY(0%); pointer-events:auto; }
+  .menu-wrap{ margin:10px auto 0; width:min(92vw, 620px); background:#fff; border-radius:16px; box-shadow:0 14px 38px rgba(0,0,0,.18); border: 1px solid rgba(0,0,0,.10); overflow:hidden; }
+  .menu-head{ padding:12px 14px; display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid rgba(0,0,0,.08); }
+  .menu-title{ font-weight:600; }
+  .menu-close{ border:none; background:#f5f5f5; padding:6px 10px; border-radius:10px; cursor:pointer; }
+
+  .phi-card{ display:grid; grid-template-columns: 1fr 1fr; gap:0; }
+  .phi-bars{ display:grid; grid-template-rows: 55fr 89fr; height:min(38vh, 420px); }
+  .phi-bar{ display:flex; align-items:center; justify-content:center; border-right:1px solid rgba(0,0,0,.06); }
+  .phi-bar:nth-child(1){ background:linear-gradient(180deg, #f8f8f8 0%, #efefef 100%); border-bottom:1px solid rgba(0,0,0,.06); }
+  .phi-bar:nth-child(2){ background:linear-gradient(180deg, #f3f3f3 0%, #e9e9e9 100%); }
+  .phi-info{ padding:12px 14px; }
+  .kbd{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; background:#f5f5f5; border:1px solid rgba(0,0,0,.12); border-bottom-width:2px; border-radius:8px; padding:2px 6px; margin:0 2px; }
+  .keys{ line-height:1.85; color:#111; font-size:14px; }
+  .live { margin-top:10px; color:#333; font-size:13px; }
+  canvas { display:block; }
+</style>
+</head>
+<body>
+  <div id="stage" class="stage"></div>
+
+  <!-- Menu UI -->
+  <button id="menuBtn" class="menu-button" aria-label="Open menu">☰</button>
+  <div id="menuPanel" class="menu-panel" aria-hidden="true">
+    <div class="menu-wrap">
+      <div class="menu-head">
+        <div class="menu-title">φ cycle — 55 → 89 (golden)</div>
+        <button class="menu-close" id="menuClose">close</button>
+      </div>
+      <div class="phi-card">
+        <div class="phi-bars">
+          <div class="phi-bar"><div>55s — fade to dark</div></div>
+          <div class="phi-bar"><div>89s — rise to bright</div></div>
+        </div>
+        <div class="phi-info">
+          <div style="margin-bottom:6px; font-weight:600;">Shortcuts</div>
+          <div class="keys">
+            drag: tilt • pinch/scroll: zoom • <span class="kbd">Z</span>: reset zoom • <span class="kbd">Space</span>: auto-orbit<br/>
+            <span class="kbd">↑↓←→</span> veya <span class="kbd">W A S D</span>: tilt (basılı) • <span class="kbd">Enter</span>: set center • <span class="kbd">Shift</span>+click: set center<br/>
+            Radius <span class="kbd">1</span>/<span class="kbd">2</span> • Width <span class="kbd">3</span>/<span class="kbd">4</span> • Gain <span class="kbd">5</span>/<span class="kbd">6</span> • Reset <span class="kbd">7</span><br/>
+            Speckle density <span class="kbd">V</span>/<span class="kbd">B</span> • Ripple pulse <span class="kbd">X</span><br/>
+            Orbit speed ± <span class="kbd">E</span>/<span class="kbd">F</span> • Quantum <span class="kbd">Q</span> • Collapse <span class="kbd">C</span> • Reseed <span class="kbd">R</span><br/>
+            Breath speed ± (φ oranı korunur) <span class="kbd">T</span>/<span class="kbd">G</span> — 5 sn basılı = ×φ
+          </div>
+          <div id="live" class="live"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+/* ===== Three.js sahnesi — minimal beyaz ışık halkası ===== */
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+const stage = document.getElementById('stage');
+
+// Renderer
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+// Scene & Camera
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.01, 100);
+scene.add(camera);
+let zoom = 1, MIN_ZOOM = 0.35, MAX_ZOOM = 4;
+const baseCamZ = 3.2;
+camera.position.set(0, 0, baseCamZ);
+
+/* ===== Light Ring (core + halo) ===== */
+const coreGeo = new THREE.TorusGeometry(1.0, 0.12, 96, 512);
+const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent:true, opacity:1.0 });
+const ringCore = new THREE.Mesh(coreGeo, coreMat);
+ringCore.renderOrder = 2;
+scene.add(ringCore);
+
+// Quantum durumları & merkez
+let quantumCollapsed = false;
+let lastPointerXY = { x: innerWidth*0.5, y: innerHeight*0.5 };
+
+// Halo shader
+const haloVert = /* glsl */`
+  varying vec2 vUv;
+  void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+`;
+const haloFrag = /* glsl */`
+  varying vec2 vUv;
+  uniform float uTime, uRadius, uWidth, uGain, uAngle, uBrightness;
+  uniform vec2  uCenter;  uniform float uRippleT;  uniform float uQuantum;
+  uniform float uPhase;   uniform float uDensity;  uniform float uSeed;
+  float hash21(vec2 p){ p = fract(p*vec2(123.34,345.45)); p += dot(p,p+34.345); return fract(p.x*p.y); }
+  vec2 rot(vec2 p, float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c)*p; }
+  void main(){
+    vec2 p = vUv*2.0 - 1.0; p = rot(p, uAngle);
+    float r = length(p);
+    float ring = exp(-pow((r - uRadius) * uWidth, 2.0));
+    float cm = exp( -12.0 * dot(p - uCenter, p - uCenter) );
+    float distC = length(p - uCenter);
+    float ripple = 1.0 + 0.08 * sin(14.0*distC - 3.0*uRippleT) * exp(-2.5*distC);
+    float fade = smoothstep(1.0, 0.2, r);
+    float a = ring * uGain * fade * mix(1.0, cm, 0.7) * ripple * clamp(uBrightness, 0.0, 1.0);
+    if(uQuantum > 0.5){
+      float theta = atan(p.y, p.x);
+      float n = 220.0 * uDensity;
+      float id = floor((theta + 3.14159265) / (6.2831853) * n);
+      float rnd = hash21(vec2(id + floor(uPhase), uSeed));
+      float nearRing = exp(-pow((r - uRadius) * (uWidth*0.65), 2.0));
+      float blink = step(0.82, rnd);
+      a += nearRing * blink * 0.25 * fade * clamp(uBrightness, 0.0, 1.0);
+    }
+    if(a < 0.002) discard; gl_FragColor = vec4(1.0, 1.0, 1.0, a);
+  }
+`;
+const haloMat = new THREE.ShaderMaterial({
+  vertexShader: haloVert,
+  fragmentShader: haloFrag,
+  transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  uniforms: {
+    uTime:{ value:0 }, uRadius:{ value:0.78 }, uWidth:{ value:14.0 }, uGain:{ value:11 },
+    uAngle:{ value:0.0 }, uBrightness:{ value:1.0 },
+    uCenter:{ value:new THREE.Vector2(0.0, 0.0) }, uRippleT:{ value:0.0 },
+    uQuantum:{ value:1.0 }, /* default ON */ uPhase:{ value:0.0 },
+    uDensity:{ value:0.7 }, uSeed:{ value: Math.random()*1000.0 }
+  }
+});
+const haloSize = 3.6;
+const halo = new THREE.Mesh(new THREE.PlaneGeometry(haloSize, haloSize), haloMat);
+halo.position.set(0, 0, 0);
+halo.renderOrder = 1;
+scene.add(halo);
+
+// Ambient darkening plane
+const ambientFrag = /* glsl */`
+  varying vec2 vUv; uniform float uBrightness, uRadius, uStrength; uniform vec2 uCenter;
+  void main(){
+    vec2 p = vUv*2.0 - 1.0; float d = length(p - uCenter);
+    float band = 1.0 - smoothstep(0.10, 0.42, abs(d - uRadius));
+    float edge = smoothstep(0.20, 1.05, d);
+    float ambient = edge * (1.0 - band);
+    float alpha = (1.0 - uBrightness) * uStrength * ambient;
+    if(alpha < 0.002) discard; gl_FragColor = vec4(0.0,0.0,0.0, alpha);
+  }
+`;
+const ambientMat = new THREE.ShaderMaterial({
+  vertexShader: haloVert, fragmentShader: ambientFrag,
+  transparent: true, depthWrite: false, depthTest: false,
+  uniforms: { uBrightness:{ value:1.0 }, uRadius:{ value:0.78 }, uStrength:{ value:0.7 }, uCenter:{ value:new THREE.Vector2(0.0, 0.0) } }
+});
+const ambient = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), ambientMat);
+ambient.position.set(0,0, -0.001); ambient.renderOrder = 0;
+scene.add(ambient);
+
+/* ===== Etkileşim ve kontrol ===== */
+let pitch = -0.05, yaw = 0.4;
+let autoOrbit = false;
+let orbitYawSpeed = 0.25, orbitPitchSpeed = 0.10; // ayarlanabilir
+const KEY_TILT_SPEED = 1.8; // rad/sn (basılı tutarken dt ile ölçeklenir)
+
+// Basılı tutma takibi
+const down = new Set();
+
+// Sürekli ayar hızları
+const RADIUS_SPEED = 0.30;   // birim/sn
+const WIDTH_SPEED  = 6.0;    // birim/sn
+const GAIN_SPEED   = 0.9;    // birim/sn
+const DENS_SPEED   = 0.8/1.0;// birim/sn
+
+// Breath hızı — 5 sn basılı = ×φ
+const PHI = (1 + Math.sqrt(5)) / 2;
+const BREATH_LOG_RATE = Math.log(PHI) / 5.0;  // per second
+let breathSpeed = 1.0; // 1.0 → 55/89, m → 55/m & 89/m
+const BREATH_MIN = 1/50, BREATH_MAX = 50;
+
+// Inertia
+let dragging=false, lastX=0, lastY=0; let velYaw=0, velPitch=0; let inertiaActive=false, inertiaProfile='average';
+const INERTIA_DECAY = { slow:1.6, average:2.8, fast:4.5 };
+
+// Yardımcılar
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function setObjectTransform(){ ringCore.rotation.set(pitch, yaw, 0); }
+setObjectTransform();
+
+// Key down/up — set-based
+addEventListener('keydown', e=>{
+  const k = e.key;
+  down.add(k.toLowerCase());
+
+  // anlık toggles
+  if (e.code==='Space'){ autoOrbit=!autoOrbit; e.preventDefault(); }
+  if (k.toLowerCase()==='q'){ haloMat.uniforms.uQuantum.value = 1.0 - haloMat.uniforms.uQuantum.value; }
+  if (k.toLowerCase()==='c'){ quantumCollapsed = !quantumCollapsed; }
+  if (k.toLowerCase()==='r'){ haloMat.uniforms.uSeed.value = Math.random()*1000.0; }
+  if (k.toLowerCase()==='z'){ zoom=1; camera.position.z = baseCamZ; }
+  if (k === 'Enter'){ setCenterFromClientXY(lastPointerXY.x, lastPointerXY.y); }
+  if (k.toLowerCase()==='s') inertiaProfile='slow';
+  if (k.toLowerCase()==='a') inertiaProfile='average';
+  if (k.toLowerCase()==='f') inertiaProfile='fast';
+
+  e.key === 'Escape' && toggleMenu(false);
+});
+addEventListener('keyup', e=>{ down.delete(e.key.toLowerCase()); });
+
+function applyHeldControls(dt){
+  // WASD + oklar → sürekli tilt
+  if (down.has('w') || down.has('arrowup'))    pitch -= KEY_TILT_SPEED * dt;
+  if (down.has('s') || down.has('arrowdown'))  pitch += KEY_TILT_SPEED * dt;
+  if (down.has('a') || down.has('arrowleft'))  yaw   -= KEY_TILT_SPEED * dt;
+  if (down.has('d') || down.has('arrowright')) yaw   += KEY_TILT_SPEED * dt;
+
+  // Radius 1/2
+  if (down.has('1')) { haloMat.uniforms.uRadius.value -= RADIUS_SPEED * dt; }
+  if (down.has('2')) { haloMat.uniforms.uRadius.value += RADIUS_SPEED * dt; }
+  haloMat.uniforms.uRadius.value = clamp(haloMat.uniforms.uRadius.value, 0.30, 1.40);
+  ambientMat.uniforms.uRadius.value = haloMat.uniforms.uRadius.value;
+
+  // Width 3/4
+  if (down.has('3')) { haloMat.uniforms.uWidth.value = Math.max(2.0, haloMat.uniforms.uWidth.value - WIDTH_SPEED*dt); }
+  if (down.has('4')) { haloMat.uniforms.uWidth.value += WIDTH_SPEED*dt; }
+
+  // Gain 5/6
+  if (down.has('5')) { haloMat.uniforms.uGain.value = Math.max(0.05, haloMat.uniforms.uGain.value - GAIN_SPEED*dt); }
+  if (down.has('6')) { haloMat.uniforms.uGain.value = Math.min(30.0,  haloMat.uniforms.uGain.value + GAIN_SPEED*dt); }
+
+  // Reset 7
+  if (down.has('7')) {
+    haloMat.uniforms.uRadius.value = 0.78;
+    haloMat.uniforms.uWidth.value  = 14.0;
+    haloMat.uniforms.uGain.value   = 0.9;
+    haloMat.uniforms.uDensity.value= 0.7;
+    breathSpeed = 1.0;
+    orbitYawSpeed = 0.25; orbitPitchSpeed = 0.10;
+  }
+
+  // Density V/B
+  if (down.has('v')) { haloMat.uniforms.uDensity.value = Math.max(0.2, haloMat.uniforms.uDensity.value - DENS_SPEED*dt); }
+  if (down.has('b')) { haloMat.uniforms.uDensity.value = Math.min(1.5, haloMat.uniforms.uDensity.value + DENS_SPEED*dt); }
+
+  // Ripple X (küçük itiş)
+  if (down.has('x')) { haloMat.uniforms.uRippleT.value += 7.0 * dt; }
+
+  // Orbit speed E/F
+  if (down.has('e')) { orbitYawSpeed   = Math.min(3.0, orbitYawSpeed   + 0.8*dt);
+                       orbitPitchSpeed = Math.min(2.0, orbitPitchSpeed + 0.5*dt); }
+  if (down.has('f')) { orbitYawSpeed   = Math.max(0.0, orbitYawSpeed   - 0.8*dt);
+                       orbitPitchSpeed = Math.max(0.0, orbitPitchSpeed - 0.5*dt); }
+
+  // Breath speed T/G — 5s basılı = ×φ
+  if (down.has('t')) { breathSpeed = Math.min(BREATH_MAX, breathSpeed * Math.exp(BREATH_LOG_RATE * dt * 60/60)); }
+  if (down.has('g')) { breathSpeed = Math.max(BREATH_MIN, breathSpeed / Math.exp(BREATH_LOG_RATE * dt * 60/60)); }
+
+  setObjectTransform();
+}
+
+// Mouse/touch etkileşimleri (zoom & momentum & center)
+stage.addEventListener('wheel', ev=>{
+  const scale = Math.exp(-ev.deltaY * 0.001);
+  zoom = clamp(zoom * scale, MIN_ZOOM, MAX_ZOOM);
+  camera.position.z = baseCamZ / zoom;
+  ev.preventDefault();
+}, {passive:false});
+
+function nowMs(){ return performance.now(); }
+let lastSamples=[]; function pushSample(x,y,ts){ lastSamples.push({x,y,ts}); const cutoff = ts - 80; while (lastSamples.length && lastSamples[0].ts < cutoff) lastSamples.shift(); }
+const activePointers = new Map(); let pinching=false, startDist=0, baseZoom=zoom;
+function distance(pA,pB){ const dx=pA.x-pB.x, dy=pA.y-pB.y; return Math.hypot(dx,dy); }
+
+function onPointerDown(ev){ try{ stage.setPointerCapture(ev.pointerId);}catch{} activePointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY}); if (activePointers.size < 2){ dragging=true; inertiaActive=false; lastX=ev.clientX; lastY=ev.clientY; lastSamples=[]; pushSample(lastX,lastY,nowMs()); } ev.preventDefault(); }
+function onPointerMove(ev){
+  lastPointerXY.x = ev.clientX; lastPointerXY.y = ev.clientY;
+  if (activePointers.has(ev.pointerId)) activePointers.set(ev.pointerId, {x:ev.clientX, y:ev.clientY});
+  if (pinching){ handlePinchUpdate(); ev.preventDefault(); return; }
+  if (!dragging) return;
+  const x=ev.clientX, y=ev.clientY; const dx=x-lastX, dy=y-lastY; const ts=nowMs();
+  const kx = 2*Math.PI / innerHeight; const ky = 2*Math.PI / innerWidth;
+  const dPitch = -dy * kx * 0.25; const dYaw   =  dx * ky * 0.25;
+  pitch += dPitch; yaw += dYaw; setObjectTransform();
+  const prevTs = lastSamples.at(-1)?.ts ?? ts; const dt = Math.max((ts - prevTs)/1000, 1/240);
+  velPitch = dPitch/dt; velYaw = dYaw/dt;
+  lastX=x; lastY=y; pushSample(x,y,ts); ev.preventDefault();
+}
+function setCenterFromClientXY(x, y){ const nx = (x / innerWidth) * 2 - 1; const ny = -((y / innerHeight) ) * 2 + 1; haloMat.uniforms.uCenter.value.set(nx, ny); ambientMat.uniforms.uCenter.value.set(nx, ny); haloMat.uniforms.uRippleT.value = 0.0; }
+function onPointerUp(ev){
+  if (activePointers.has(ev.pointerId)) activePointers.delete(ev.pointerId);
+  if (pinching && activePointers.size<2){ pinching=false; baseZoom=zoom; }
+  if (ev.shiftKey && activePointers.size===0){ setCenterFromClientXY(ev.clientX, ev.clientY); }
+  if (!dragging){ ev.preventDefault(); return; }
+  dragging=false;
+  const first=lastSamples[0], last=lastSamples.at(-1);
+  if (first && last && last.ts>first.ts){
+    const dx=last.x-first.x, dy=last.y-first.y, dt=(last.ts-first.ts)/1000;
+    const kx=2*Math.PI/innerHeight, ky=2*Math.PI/innerWidth;
+    velPitch=(-dy*kx*0.25)/dt; velYaw=(dx*ky*0.25)/dt;
+  }
+  inertiaActive=true; try{ stage.releasePointerCapture(ev.pointerId);}catch{} ev.preventDefault();
+}
+stage.addEventListener('pointerdown', onPointerDown, {passive:false});
+stage.addEventListener('pointermove', onPointerMove, {passive:false});
+stage.addEventListener('pointerup', onPointerUp, {passive:false});
+stage.addEventListener('pointercancel', onPointerUp, {passive:false});
+
+function handlePinchUpdate(){
+  if (activePointers.size<2) return;
+  const pts=[...activePointers.values()];
+  const d=distance(pts[0],pts[1]);
+  if (!pinching){ pinching=true; startDist=d||1; baseZoom=zoom; dragging=false; inertiaActive=false; return; }
+  const factor = d / (startDist||1);
+  zoom = clamp(baseZoom*factor, MIN_ZOOM, MAX_ZOOM);
+  camera.position.z = baseCamZ / zoom;
+}
+window.addEventListener('gesturestart', e=>{ baseZoom=zoom; e.preventDefault(); }, {passive:false});
+window.addEventListener('gesturechange', e=>{ zoom = clamp(baseZoom*e.scale, MIN_ZOOM, MAX_ZOOM); camera.position.z = baseCamZ / zoom; e.preventDefault();},{passive:false});
+window.addEventListener('gestureend', e=>{ e.preventDefault(); }, {passive:false});
+
+/* ===== Breath (φ oranı sabit; hız ölçekli) ===== */
+// φ oranı korunur; breathSpeed çarpanı 55/89’u aynı oranda hızlandırır/yavaşlatır.
+function phiBrightness(tScaled){ // tScaled: saniye ( hız uygulanmış )
+  const T1 = 7.0, T2 = 3.0, T = T1 + T2;
+  const m = ((tScaled % T) + T) % T;
+  if (m < T1){ const u = m / T1; return 0.5 * (1.0 + Math.cos(Math.PI * u)); }
+  else       { const u = (m - T1) / T2; return 0.5 * (1.0 - Math.cos(Math.PI * u)); }
+}
+
+/* ===== Döngü ===== */
+let lastTs = performance.now();
+const liveEl = document.getElementById('live');
+
+function tick(ts){
+  const dt=(ts-lastTs)/1000; lastTs=ts;
+
+  // Basılı tutulan kontroller
+  applyHeldControls(dt);
+
+  // Zamanlar: global ve breath
+  const tGlobal = performance.now() * 0.001;
+  const tBreath = tGlobal * breathSpeed;
+
+  // Brightness from φ rhythm (hız uygulanmış)
+  const BRIGHT_FLOOR = 0.10; // %10 taban ışık (0–1 arası)
+const B = BRIGHT_FLOOR + (1.0 - BRIGHT_FLOOR) * phiBrightness(tBreath);
+
+  // feed uniforms
+  haloMat.uniforms.uTime.value = tGlobal;
+  haloMat.uniforms.uAngle.value = tGlobal * 0.05; // gökyüzü yavaş dönsün
+  haloMat.uniforms.uBrightness.value = B;
+  ambientMat.uniforms.uBrightness.value = B;
+
+  // Quantum faz
+  if (haloMat.uniforms.uQuantum.value > 0.5 && !quantumCollapsed){ haloMat.uniforms.uPhase.value = tGlobal * 2.0; }
+  const R_DECAY = 0.96; haloMat.uniforms.uRippleT.value = haloMat.uniforms.uRippleT.value * R_DECAY + dt*6.0;
+
+  // Torus "breath" (parlaklıkla bağlı)
+  const breathAmp = 0.018, ellipseAmp = 0.012;
+  const c = haloMat.uniforms.uCenter.value; const centerMag = Math.min(Math.hypot(c.x, c.y) / Math.SQRT2, 1.0);
+  const s = 1.0 + breathAmp * (B - 0.5) * 2.0;
+  const e = ellipseAmp * centerMag;
+  ringCore.scale.set(s, s*(1.0 - e), s);
+  coreMat.opacity = B;
+
+  // billboard
+  ambient.quaternion.copy(camera.quaternion);
+  halo .quaternion.copy(camera.quaternion);
+
+  // Auto-orbit & inertia
+  if (autoOrbit){ yaw += orbitYawSpeed*dt; pitch += orbitPitchSpeed*dt; setObjectTransform(); }
+  if (inertiaActive && !dragging){
+    pitch += velPitch*dt; yaw += velYaw*dt; setObjectTransform();
+    const lambda = {slow:1.6, average:2.8, fast:4.5}[inertiaProfile] || 2.8;
+    const decay = Math.exp(-lambda*dt);
+    velPitch*=decay; velYaw*=decay;
+    if (Math.abs(velYaw)<1e-4 && Math.abs(velPitch)<1e-4){ inertiaActive=false; velYaw=velPitch=0; }
+  }
+
+  // Live info
+  const T1 = 55.0/breathSpeed, T2 = 89.0/breathSpeed;
+  liveEl.textContent = `orbit yaw:${orbitYawSpeed.toFixed(2)} pitch:${orbitPitchSpeed.toFixed(2)} • radius:${haloMat.uniforms.uRadius.value.toFixed(2)} width:${haloMat.uniforms.uWidth.value.toFixed(1)} gain:${haloMat.uniforms.uGain.value.toFixed(2)} • density:${haloMat.uniforms.uDensity.value.toFixed(2)} • breath×:${breathSpeed.toFixed(3)} ⇒ dark:${T1.toFixed(1)}s bright:${T2.toFixed(1)}s`;
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+// Resize
+addEventListener('resize', ()=>{ renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); });
+
+/* ===== Menu UI logic ===== */
+const menuBtn = document.getElementById('menuBtn');
+const menuPanel = document.getElementById('menuPanel');
+const menuClose = document.getElementById('menuClose');
+function toggleMenu(open){ const willOpen = (open ?? !menuPanel.classList.contains('open')); menuPanel.classList.toggle('open', willOpen); menuPanel.setAttribute('aria-hidden', String(!willOpen)); }
+menuBtn.addEventListener('click', ()=> toggleMenu(true));
+menuClose.addEventListener('click', ()=> toggleMenu(false));
+
+</script>
+</body>
+</html>
