@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>burak.wtf</title>
+
 <style>
   body{
     margin:0; height:100vh;
@@ -52,7 +53,11 @@
     const ENABLE_AUTH = true; // flip to true when ch4t is live
     const API_BASE = "https://ch4t.burak.wtf";
   const authArea = document.getElementById("authArea");
-  
+  (() => {
+       const $nick = document.getElementById('nick');
+       const $pass = document.getElementById('pass');
+       const $btn  = document.getElementById('reserveBtn');
+       const STORAGE_KEY = 'burak_user';
   function authHeader(){
       try{
           const raw = localStorage.getItem("burak_user");
