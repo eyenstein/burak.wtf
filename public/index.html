@@ -93,221 +93,166 @@
     .msg{ min-height:18px; color:#94a3b8; font-size:12px; margin-top:8px; }
     .hidden{ display:none; }
   </style>
-
   <script>
-    // ----- CONFIG -----
-    const API_BASE = (window.API_BASE ?? 'https://ch4t.burak.wtf'); // gerekirse düzenle
-    const LS_KEY = 'burak_user';
+  const API_BASE = "https://ch4t.burak.wtf";
+  let CURRENT = { nick: null, token: null };
 
-    function getCurrentUser(){
-      try{ return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); }catch{ return null; }
-    }
-    function setCurrentUser(u){
-      if (u) localStorage.setItem(LS_KEY, JSON.stringify(u));
-      else localStorage.removeItem(LS_KEY);
-      // diğer sekmeler güncellensin:
-      window.dispatchEvent(new StorageEvent('storage', { key: LS_KEY }));
-    }
+  function setStatus(t){ console.log(t); /* istersen UI'ye yaz */ }
 
-    async function api(path, method='GET', body){
-      const headers = { 'Content-Type':'application/json' };
-      const u = getCurrentUser();
-      if (u?.token) headers['Authorization'] = 'Bearer ' + u.token;
-      const res = await fetch(API_BASE + path, {
-        method, headers,
-        body: body ? JSON.stringify(body) : undefined,
-        credentials: 'include' // CORS_ALLOW_CREDENTIALS=true ise
+  function authHeader() {
+    try {
+      const u = JSON.parse(localStorage.getItem("burak_user") || "null");
+      if (u && u.token) return { Authorization: `Bearer ${u.token}` };
+    } catch {}
+    return {};
+  }
+
+  function saveUser(nick, token) {
+    CURRENT = { nick, token };
+    localStorage.setItem("burak_user", JSON.stringify(CURRENT));
+  }
+
+  async function reserve(nick, pass) {
+    setStatus("reserving…");
+    const res = await fetch(`${API_BASE}/api/account`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "reserve", nick, pass }),
+      credentials: "include"
+    });
+    const data = await res.json();
+    if (!data.ok) { setStatus(data.error || "reserve_failed"); return; }
+    setStatus("reserved");
+  }
+
+  async function login(nick, pass) {
+    setStatus("logging in…");
+    const res = await fetch(`${API_BASE}/api/account`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ op: "login", nick, pass }),
+      credentials: "include"
+    });
+    const data = await res.json();
+    if (!data.ok) { setStatus(data.error || "login_failed"); return; }
+    // beklenen: { ok:true, token, nick }
+    saveUser(data.nick, data.token);
+    setStatus("");
+    renderSignedIn(); // UI'ni güncelle
+  }
+
+  async function loadMe() {
+      const res = await fetch(`${API_BASE}/api/me`, { headers: { ...authHeader() },
+          credentials: "include"
       });
-      return res.json();
+    const data = await res.json();
+    if (data.ok) {
+      const nick = data.nick || (data.user && data.user.nick) || null;
+      if (nick) saveUser(nick, CURRENT.token || null);
     }
+  }
 
-    // ----- UI ELEMENTS -----
-    const $out   = document.getElementById('acct-signed-out');
-    const $in    = document.getElementById('acct-signed-in');
-    const $who   = document.getElementById('who');
-    const $nick  = document.getElementById('acc-nick');
-    const $pass  = document.getElementById('acc-pass');
-    const $msg   = document.getElementById('acc-msg');
-    const $msgIn = document.getElementById('acc-msg-in');
+  async function sendMessage(text, channel) {
+    const res = await fetch(`${API_BASE}/api/messages?ch=${encodeURIComponent(channel)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...authHeader() },
+      body: JSON.stringify({ text }),
+      credentials: "include"
+    });
+    const data = await res.json();
+    if (!data.ok) setStatus(data.error || "send_failed");
+  }
 
-    function render(){
-      const u = getCurrentUser();
-      const signed = !!u;
-      $out.classList.toggle('hidden', signed);
-      $in.classList.toggle('hidden', !signed);
-      if (signed) $who.textContent = u.nick;
-    }
+  // sayfa açılışında mevcut kullanıcıyı yükle
+  try { CURRENT = JSON.parse(localStorage.getItem("burak_user") || "null") || {}; } catch {}
+  loadMe();
+  
+  // === UI helpers ===
+  const $ = sel => document.querySelector(sel);
 
-    async function createAccount(){
-      $msg.textContent = 'reserving…';
-      const r = await api('/api/account', 'POST', { nick:$nick.value.trim(), pass:$pass.value });
-      if (!r.ok){
-        $msg.textContent = r.error || 'failed';
-        return;
+  function renderSignedIn() {
+    const nick = CURRENT?.nick || "";
+    $("#who").textContent = nick;
+    $("#acct-signed-out").classList.add("hidden");
+    $("#acct-signed-in").classList.remove("hidden");
+    setStatus(""); // konsolu temiz tutalım
+  }
+
+  function renderSignedOut() {
+    $("#who").textContent = "";
+    $("#acct-signed-in").classList.add("hidden");
+    $("#acct-signed-out").classList.remove("hidden");
+    $("#acc-msg").textContent = "";
+    $("#acc-msg-in").textContent = "";
+  }
+
+  function setStatusUI(text, signedIn = false) {
+    // mevcut setStatus(console) kalsın; bu da UI'ye yazsın
+    setStatus(text);
+    const el = signedIn ? $("#acc-msg-in") : $("#acc-msg");
+    if (el) el.textContent = text || "";
+  }
+
+  // === Button bindings ===
+  function bindAuthUI() {
+    const $nick = $("#acc-nick");
+    const $pass = $("#acc-pass");
+    const $btnCreate = $("#btn-create");
+    const $btnLogin  = $("#btn-login");
+    const $btnLogout = $("#btn-logout");
+
+    // create (reserve)
+    if ($btnCreate) $btnCreate.addEventListener("click", async () => {
+      const n = ($nick?.value || "").trim();
+      const p = $pass?.value || "";
+      if (!n || !p) { setStatusUI("nick & pass required"); return; }
+      $btnCreate.disabled = true;
+      try {
+        await reserve(n, p);
+        setStatusUI("reserved ✓");
+      } catch (e) {
+        setStatusUI("reserve_failed");
+      } finally {
+        $btnCreate.disabled = false;
       }
-      setCurrentUser({ nick:r.nick, token:r.token });
-      $msg.textContent = 'reserved ✓';
-      render();
-    }
-
-    async function login(){
-      $msg.textContent = 'logging in…';
-      const r = await api('/api/login', 'POST', { nick:$nick.value.trim(), pass:$pass.value });
-      if (!r.ok){
-        $msg.textContent = r.error || 'failed';
-        return;
-      }
-      setCurrentUser({ nick:r.nick, token:r.token });
-      $msg.textContent = 'logged in ✓';
-      render();
-    }
-
-    function logout(){
-      setCurrentUser(null);
-      $msgIn.textContent = 'logged out';
-      render();
-    }
-
-    document.getElementById('btn-create').addEventListener('click', createAccount);
-    document.getElementById('btn-login').addEventListener('click', login);
-    document.getElementById('btn-logout').addEventListener('click', logout);
-
-    // Sekmeler arası senkron
-    window.addEventListener('storage', (e)=>{
-      if (e.key === LS_KEY) render();
     });
 
-    // İlk render
-    render();
-  </script>
-
-  <script>
-  (()=>{
-    // --- ayarlar ---
-    const API_BASE = "https://ch4t.burak.wtf";   // ch4t domain’in
-    const STORAGE_KEY = "burak_user";
-
-    const authArea = document.getElementById("authArea");
-
-    function authHeader(){
-      try{
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return {};
-        const saved = JSON.parse(raw);
-        if (saved?.token) return { Authorization: `Bearer ${saved.token}` };
-      }catch{}
-      return {};
-    }
-
-    function renderForm(){
-      authArea.innerHTML = `
-        <form class="reserve-panel" onsubmit="return false;">
-          <label>
-            <span>nickname</span>
-            <input id="nick" type="text" maxlength="24" autocomplete="username" placeholder="your_nick">
-          </label>
-          <label>
-            <span>password</span>
-            <input id="pass" type="password" maxlength="64" autocomplete="new-password" placeholder="••••••••">
-          </label>
-          <button id="reserveBtn" type="button">reserve(d)</button>
-          <p id="reserveMsg" class="msg"></p>
-        </form>
-      `;
-
-      const btn  = document.getElementById("reserveBtn");
-      const nick = document.getElementById("nick");
-      const pass = document.getElementById("pass");
-      const msg  = document.getElementById("reserveMsg");
-
-      // enter ile gönder
-      [nick, pass].forEach(inp => inp.addEventListener("keydown", (e)=>{
-        if (e.key === "Enter") { e.preventDefault(); btn.click(); }
-      }));
-
-      btn.onclick = async ()=>{
-        msg.textContent = "";
-        const n = (nick.value || "").trim();
-        const p = pass.value || "";
-        if (!n || !p) { msg.textContent = "need both"; return; }
-
-        btn.disabled = true; btn.textContent = "…";
-        try{
-          const res = await fetch(API_BASE + "/api/account", {
-            method:"POST",
-            headers:{ "content-type":"application/json", ...authHeader() },
-            body: JSON.stringify({ nick:n, pass:p })
-            credentials: "include"
-          });
-          const data = await res.json().catch(()=> ({}));
-          if (!res.ok || !data?.ok) throw new Error(data?.error || ("http "+res.status));
-
-          // sakla + UI'ı kilitle
-          localStorage.setItem(STORAGE_KEY, JSON.stringify({ nick: data.nick, token: data.token || "" }));
-          renderLocked(data.nick);
-        }catch(e){
-          const map = {
-            nick_taken:"already reserved",
-            wrong_password:"wrong pw",
-            nick_and_pass_required:"need both",
-            db_not_configured:"sorry"
-          };
-          msg.textContent = map[e.message] || e.message || "bug";
-          btn.disabled = false; btn.textContent = "reserve(d)";
-        }
-      };
-    }
-
-    function renderLocked(nick){
-      authArea.innerHTML = `
-        <form class="reserve-panel" onsubmit="return false;">
-          <label>
-            <span>nickname</span>
-            <input type="text" value="${nick}" disabled>
-          </label>
-          <label>
-            <span>password</span>
-            <input type="password" value="********" disabled>
-          </label>
-          <button type="button" disabled>reserved ✓</button>
-          <p class="msg">signed in as <strong>${nick}</strong></p>
-        </form>
-      `;
-    }
-
-    // sayfa açılışı
-    (async function init(){
-      // localStorage’da kullanıcı varsa direkt kilitli görünüm
-      try{
-        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-        if (saved?.nick) return renderLocked(saved.nick);
-      }catch{}
-
-      // yoksa opsiyonel /me (Bearer ile)
-      try{
-        const r = await fetch(API_BASE + "/api/me", { headers: { ...authHeader() } });
-        if (r.ok) {
-          const d = await r.json();
-          if (d?.ok && d.nick) {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({ nick: d.nick, token: d.token || "" }));
-            return renderLocked(d.nick);
-          }
-        }
-      }catch{}
-
-      // formu göster
-      renderForm();
-    })();
-
-    // başka sekmede login olursa güncelle
-    window.addEventListener("storage", (e)=>{
-      if (e.key === STORAGE_KEY) {
-        try{
-          const u = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-          if (u?.nick) renderLocked(u.nick);
-          else renderForm();
-        }catch{ renderForm(); }
+    // login
+    if ($btnLogin) $btnLogin.addEventListener("click", async () => {
+      const n = ($nick?.value || "").trim();
+      const p = $pass?.value || "";
+      if (!n || !p) { setStatusUI("nick & pass required"); return; }
+      $btnLogin.disabled = true;
+      setStatusUI("logging in…");
+      try {
+        await login(n, p);         // login başarılı olursa renderSignedIn() çağrılıyor
+        setStatusUI("", true);
+      } catch (e) {
+        setStatusUI("login_failed");
+      } finally {
+        $btnLogin.disabled = false;
       }
+    });
+
+    // logout
+    if ($btnLogout) $btnLogout.addEventListener("click", () => {
+      localStorage.removeItem("burak_user");
+      CURRENT = { nick:null, token:null };
+      renderSignedOut();
+    });
+  }
+
+  // === İlk açılışta paneli doğru kur ===
+  (function initAuth() {
+    // LocalStorage’dan nick varsa signed-in’e geç
+    if (CURRENT?.nick) renderSignedIn(); else renderSignedOut();
+
+    // UI olaylarını bağla
+    bindAuthUI();
+
+    // /api/me ile nick’i doğrula/yenile
+    loadMe().then(() => {
+      if (CURRENT?.nick) renderSignedIn();
     });
   })();
   </script>
