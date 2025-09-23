@@ -82,11 +82,13 @@
   }
 
   async function doReserve(n, p) {
-    const res = await fetch(API_BASE + "/api/account", {
-      method:"POST",
-      headers:{ "Content-Type":"application/json", ...authHeader() },
-      body: JSON.stringify({ nick:n, pass:p })
-    });
+      const res = await fetch(API_BASE + "/api/account", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json", ...authHeader() },
+        credentials: "include",              // ← EKLE
+        body: JSON.stringify({ nick:n, pass:p })
+      });
+
     const data = await res.json().catch(()=> ({}));
     if(!res.ok) throw new Error(data.error || "wdym");
 
@@ -147,7 +149,10 @@
         if (u?.nick) return renderWelcome(u.nick);
       }
       // Yoksa me endpoint (opsiyonel)
-      const r = await fetch(API_BASE + "/api/me", { headers: { ...authHeader() } });
+      const r = await fetch(API_BASE + "/api/me", {
+        headers: { ...authHeader() },
+        credentials: "include"               // ← EKLE
+      });
       if (r.ok) {
         const d = await r.json();
         if (d.ok && d.nick) return renderWelcome(d.nick);
