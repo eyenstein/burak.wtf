@@ -49,6 +49,137 @@
       <div id="authArea"></div>
     </div>
   </div>
+  <!-- ACCOUNT WIDGET -->
+  <section id="account" class="account-panel">
+    <div class="card">
+      <h3>account</h3>
+
+      <div id="acct-signed-out">
+        <label>
+          <span>nick</span>
+          <input id="acc-nick" type="text" autocomplete="username" placeholder="pick a nickname">
+        </label>
+        <label>
+          <span>pass</span>
+          <input id="acc-pass" type="password" autocomplete="current-password" placeholder="set a password">
+        </label>
+        <div class="row">
+          <button id="btn-create">reserve (create)</button>
+          <button id="btn-login">log in</button>
+        </div>
+        <p id="acc-msg" class="msg"></p>
+      </div>
+
+      <div id="acct-signed-in" class="hidden">
+        <p>Signed in as <b id="who"></b></p>
+        <div class="row">
+          <button id="btn-logout">log out</button>
+        </div>
+        <p id="acc-msg-in" class="msg"></p>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .account-panel{ position:fixed; right:2rem; bottom:2rem; z-index:50; }
+    .card{ background:#0f172a; border:1px solid #1f2937; padding:16px; width:300px; border-radius:14px; box-shadow:0 8px 30px rgba(0,0,0,.35) }
+    .card h3{ margin:0 0 8px; color:#e5e7eb; font-weight:600; }
+    label{ display:flex; flex-direction:column; gap:6px; margin:8px 0; color:#cbd5e1; font-size:14px;}
+    input{ background:#111827; color:#e5e7eb; border:1px solid #334155; border-radius:10px; padding:10px 12px; outline:none; }
+    input::placeholder{ color:#94a3b8; }
+    .row{ display:flex; gap:8px; margin-top:10px; }
+    button{ padding:10px 12px; border-radius:10px; border:1px solid #334155; background:#0b1220; color:#e5e7eb; cursor:pointer; }
+    button:hover{ border-color:#475569; }
+    .msg{ min-height:18px; color:#94a3b8; font-size:12px; margin-top:8px; }
+    .hidden{ display:none; }
+  </style>
+
+  <script>
+    // ----- CONFIG -----
+    const API_BASE = (window.API_BASE ?? 'https://ch4t.burak.wtf'); // gerekirse düzenle
+    const LS_KEY = 'burak_user';
+
+    function getCurrentUser(){
+      try{ return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); }catch{ return null; }
+    }
+    function setCurrentUser(u){
+      if (u) localStorage.setItem(LS_KEY, JSON.stringify(u));
+      else localStorage.removeItem(LS_KEY);
+      // diğer sekmeler güncellensin:
+      window.dispatchEvent(new StorageEvent('storage', { key: LS_KEY }));
+    }
+
+    async function api(path, method='GET', body){
+      const headers = { 'Content-Type':'application/json' };
+      const u = getCurrentUser();
+      if (u?.token) headers['Authorization'] = 'Bearer ' + u.token;
+      const res = await fetch(API_BASE + path, {
+        method, headers,
+        body: body ? JSON.stringify(body) : undefined,
+        credentials: 'include' // CORS_ALLOW_CREDENTIALS=true ise
+      });
+      return res.json();
+    }
+
+    // ----- UI ELEMENTS -----
+    const $out   = document.getElementById('acct-signed-out');
+    const $in    = document.getElementById('acct-signed-in');
+    const $who   = document.getElementById('who');
+    const $nick  = document.getElementById('acc-nick');
+    const $pass  = document.getElementById('acc-pass');
+    const $msg   = document.getElementById('acc-msg');
+    const $msgIn = document.getElementById('acc-msg-in');
+
+    function render(){
+      const u = getCurrentUser();
+      const signed = !!u;
+      $out.classList.toggle('hidden', signed);
+      $in.classList.toggle('hidden', !signed);
+      if (signed) $who.textContent = u.nick;
+    }
+
+    async function createAccount(){
+      $msg.textContent = 'reserving…';
+      const r = await api('/api/account', 'POST', { nick:$nick.value.trim(), pass:$pass.value });
+      if (!r.ok){
+        $msg.textContent = r.error || 'failed';
+        return;
+      }
+      setCurrentUser({ nick:r.nick, token:r.token });
+      $msg.textContent = 'reserved ✓';
+      render();
+    }
+
+    async function login(){
+      $msg.textContent = 'logging in…';
+      const r = await api('/api/login', 'POST', { nick:$nick.value.trim(), pass:$pass.value });
+      if (!r.ok){
+        $msg.textContent = r.error || 'failed';
+        return;
+      }
+      setCurrentUser({ nick:r.nick, token:r.token });
+      $msg.textContent = 'logged in ✓';
+      render();
+    }
+
+    function logout(){
+      setCurrentUser(null);
+      $msgIn.textContent = 'logged out';
+      render();
+    }
+
+    document.getElementById('btn-create').addEventListener('click', createAccount);
+    document.getElementById('btn-login').addEventListener('click', login);
+    document.getElementById('btn-logout').addEventListener('click', logout);
+
+    // Sekmeler arası senkron
+    window.addEventListener('storage', (e)=>{
+      if (e.key === LS_KEY) render();
+    });
+
+    // İlk render
+    render();
+  </script>
 
   <script>
   (()=>{
