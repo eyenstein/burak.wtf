@@ -106,6 +106,7 @@
             method:"POST",
             headers:{ "content-type":"application/json", ...authHeader() },
             body: JSON.stringify({ nick:n, pass:p })
+            credentials: "include"
           });
           const data = await res.json().catch(()=> ({}));
           if (!res.ok || !data?.ok) throw new Error(data?.error || ("http "+res.status));
